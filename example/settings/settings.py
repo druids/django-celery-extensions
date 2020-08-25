@@ -168,8 +168,10 @@ TEMPLATES = [
 
 CELERY_EAGER_PROPAGATES_EXCEPTIONS = False
 CELERY_ALWAYS_EAGER = True
-BROKER_BACKEND = 'memory'
 CELERY_DEFAULT_QUEUE = 'default'
+CELERYD_TASK_TIME_LIMIT = 60 * 5  # 5 minutes for default tasks
+CELERYD_TASK_SOFT_TIME_LIMIT = 60 * 2  # 2 minutes for default tasks soft time limit
+BROKER_BACKEND = 'memory'
 
 DJANGO_CELERY_EXTENSIONS_AUTO_GENERATE_TASKS_DJANGO_COMMANDS = {
     'check': {},
