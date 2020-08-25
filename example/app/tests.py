@@ -49,3 +49,7 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
     def test_django_command_should_be_run_via_task(self):
         get_django_command_task('create_user').apply_async()
         assert_true(User.objects.exists())
+
+    @override_settings(DJANGO_CELERY_EXTENSIONS_TASK_STALE_TIMELIMIT_FROM_TIME_LIMIT_CONSTANT=1.5)
+    def test_stale_time_limit_should_be_computed_from_soft_time_limit(self):
+        assert_equal(unique_task.apply_async_and_get_result(), 'unique')
