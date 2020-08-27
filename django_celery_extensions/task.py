@@ -2,6 +2,7 @@ import os
 import base64
 import logging
 import pickle
+import math
 
 import uuid
 
@@ -142,7 +143,7 @@ class DjangoTask(Task):
         expires = self.expires if expires is None else expires
         if expires is not None:
             return apply_time + timedelta(seconds=expires) if isinstance(expires, int) else expires
-        elif self._get_stale_time_limit(stale_time_limit) is not None and time_limit is not None:
+        elif stale_time_limit is not None and time_limit is not None:
             return apply_time + timedelta(seconds=stale_time_limit - time_limit)
         else:
             return None
@@ -155,13 +156,15 @@ class DjangoTask(Task):
         else:
             return self._get_app().conf.task_time_limit
 
-    def _get_stale_time_limit(self, stale_time_limit):
+    def _get_stale_time_limit(self, expires, time_limit, stale_time_limit, apply_time):
         if stale_time_limit is not None:
             return stale_time_limit
         elif self.stale_time_limit is not None:
             return self.stale_time_limit
         elif settings.TASK_STALE_TIME_LIMIT is not None:
             return settings.TASK_STALE_TIME_LIMIT
+        elif time_limit is not None and settings.TASK_STALE_TIMELIMIT_FROM_TIME_LIMIT_CONSTANT:
+            return math.ceil(time_limit * settings.TASK_STALE_TIMELIMIT_FROM_TIME_LIMIT_CONSTANT)
         else:
             return None
 
@@ -182,10 +185,11 @@ class DjangoTask(Task):
         task_id = task_id or task_uuid()
         apply_time = now()
         time_limit = self._get_time_limit(time_limit)
+
         eta = self._compute_eta(eta, countdown, apply_time)
         countdown = None
         queue = str(options.get('queue', getattr(self, 'queue', self._get_app().conf.task_default_queue)))
-        stale_time_limit = self._get_stale_time_limit(stale_time_limit)
+        stale_time_limit = self._get_stale_time_limit(expires, time_limit, stale_time_limit, apply_time)
         expires = self._compute_expires(expires, time_limit, stale_time_limit, apply_time)
 
         options.update(dict(
@@ -317,7 +321,8 @@ def auto_convert_commands_to_tasks():
                     base=import_string(settings.AUTO_GENERATE_TASKS_BASE),
                     bind=True,
                     name=command_name,
-                    ignore_result=True
+                    ignore_result=True,
+                    **settings.AUTO_GENERATE_TASKS_DEFAULT_CELERY_KWARGS
                 )
                 shared_task_kwargs.update(settings.AUTO_GENERATE_TASKS_DJANGO_COMMANDS[command_name])
 
