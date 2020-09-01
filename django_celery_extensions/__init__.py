@@ -3,8 +3,8 @@
 """Top-level package for Django celery extensions."""
 
 __author__ = """Luboš Mátl"""
-__email__ = 'matlluboso@gmail.com'
-__version__ = '0.0.2'
+__email__ = 'matllubos@gmail.com'
+__version__ = '0.0.3'
 
 
 default_app_config = 'django_celery_extensions.apps.DjangoCeleryExtensionsAppConfig'

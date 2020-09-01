@@ -2,6 +2,11 @@
 History
 =======
 
+0.0.3 (2020-09-01)
+
+* Locked beater uses new redis cache. Fixed locked scheduler with low lock timeout value.
+
+
 0.0.2 (2020-08-27)
 ------------------
 
