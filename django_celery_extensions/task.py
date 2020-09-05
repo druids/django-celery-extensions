@@ -40,11 +40,17 @@ cache = caches[settings.CACHE_NAME]
 
 
 def default_unique_key_generator(task, task_args, task_kwargs):
+    def serialize_value(v):
+        if isinstance(v, (tuple, list)):
+            return str(list(v))
+        else:
+            return str(v)
+
     unique_key = [settings.KEY_PREFIX, task.name]
     if task_args:
-        unique_key += [str(v) for v in task_args]
+        unique_key += [serialize_value(v) for v in task_args]
     if task_kwargs:
-        unique_key += ['{}={}'.format(k, v) for k, v in task_kwargs.items()]
+        unique_key += ['{}={}'.format(k, serialize_value(v)) for k, v in task_kwargs.items()]
     return ':'.join(unique_key)
 
 
@@ -200,6 +206,7 @@ class DjangoTask(Task):
             expires=expires,
         ))
         unique_task_id = self._get_unique_task_id(task_id, args, kwargs, stale_time_limit)
+
         if is_async and unique_task_id != task_id:
             return AsyncResult(unique_task_id, app=self._get_app())
 
