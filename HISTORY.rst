@@ -2,6 +2,11 @@
 History
 =======
 
+0.0.4 (2020-09-05)
+
+* Partial fix of celery key generator.
+
+
 0.0.3 (2020-09-01)
 
 * Locked beater uses new redis cache. Fixed locked scheduler with low lock timeout value.
