@@ -25,6 +25,7 @@ try:
     from celery.result import AsyncResult
     from celery.exceptions import CeleryError, TimeoutError
     from kombu.utils import uuid as task_uuid
+    from kombu import serialization
 except ImportError:
     raise ImproperlyConfigured('Missing celery library, please install it')
 
@@ -40,18 +41,13 @@ cache = caches[settings.CACHE_NAME]
 
 
 def default_unique_key_generator(task, task_args, task_kwargs):
-    def serialize_value(v):
-        if isinstance(v, (tuple, list)):
-            return str(list(v))
-        else:
-            return str(v)
+    task_args = task_args or ()
+    task_kwargs = task_kwargs or {}
 
-    unique_key = [settings.KEY_PREFIX, task.name]
-    if task_args:
-        unique_key += [serialize_value(v) for v in task_args]
-    if task_kwargs:
-        unique_key += ['{}={}'.format(k, serialize_value(v)) for k, v in task_kwargs.items()]
-    return ':'.join(unique_key)
+    _, _, data = serialization.dumps(
+        (list(task_args), task_kwargs), task._get_app().conf.task_serializer,
+    )
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, ':'.join((settings.KEY_PREFIX, task.name, data))))
 
 
 class DjangoTask(Task):
@@ -101,19 +97,14 @@ class DjangoTask(Task):
         return self.run(*args, **kwargs)
 
     def _get_unique_key(self, task_args, task_kwargs):
-        return (
-            str(uuid.uuid5(uuid.NAMESPACE_DNS, self.unique_key_generator(task_args, task_kwargs)))
-            if self.unique else None
-        )
+        return self.unique_key_generator(task_args, task_kwargs) if self.unique else None
 
-    def _clear_unique_key(self, task_args, task_kwargs):
-        unique_key = self._get_unique_key(task_args, task_kwargs)
+    def _clear_unique_key(self, task_args, task_kwarg):
+        unique_key = self._get_unique_key(task_args, task_kwarg)
         if unique_key:
             cache.delete(unique_key)
 
-    def _get_unique_task_id(self, task_id, task_args, task_kwargs, stale_time_limit):
-        unique_key = self._get_unique_key(task_args, task_kwargs)
-
+    def _get_unique_task_id(self, unique_key, task_id, stale_time_limit):
         if unique_key and not stale_time_limit:
             raise CeleryError('For unique tasks is require set task stale_time_limit')
 
@@ -124,7 +115,7 @@ class DjangoTask(Task):
                 unique_task_id = cache.get(unique_key)
                 return (
                     unique_task_id if unique_task_id
-                    else self._get_unique_task_id(task_id, task_args, task_kwargs, stale_time_limit)
+                    else self._get_unique_task_id(task_id, stale_time_limit)
                 )
         else:
             return task_id
@@ -205,7 +196,8 @@ class DjangoTask(Task):
             queue=queue,
             expires=expires,
         ))
-        unique_task_id = self._get_unique_task_id(task_id, args, kwargs, stale_time_limit)
+        unique_key = self._get_unique_key(args, kwargs)
+        unique_task_id = self._get_unique_task_id(unique_key, task_id, stale_time_limit)
 
         if is_async and unique_task_id != task_id:
             return AsyncResult(unique_task_id, app=self._get_app())

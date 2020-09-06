@@ -8,7 +8,7 @@ from germanium.tools import assert_equal, assert_not_raises, assert_raises, asse
 
 from app.tasks import error_task, retry_task, sum_task, unique_task
 
-from django_celery_extensions.task import get_django_command_task
+from django_celery_extensions.task import get_django_command_task, default_unique_key_generator
 
 
 class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
@@ -49,6 +49,22 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
     def test_django_command_should_be_run_via_task(self):
         get_django_command_task('create_user').apply_async()
         assert_true(User.objects.exists())
+
+    @override_settings(DJANGO_CELERY_EXTENSIONS_TASK_STALE_TIMELIMIT_FROM_TIME_LIMIT_CONSTANT=1.5)
+    def test_default_unique_key_generator_should_generate_unique_id_for_same_input(self):
+        assert_equal(default_unique_key_generator(unique_task, None, None), '4718e7b8-12eb-51b7-a8fb-5a98dbdf20a1')
+        assert_equal(default_unique_key_generator(sum_task, None, None), '57cd2e1f-1f40-5848-a88b-ba0124e09497')
+        assert_equal(default_unique_key_generator(unique_task, (), None), '4718e7b8-12eb-51b7-a8fb-5a98dbdf20a1')
+        assert_equal(default_unique_key_generator(unique_task, None, {}), '4718e7b8-12eb-51b7-a8fb-5a98dbdf20a1')
+        assert_equal(default_unique_key_generator(unique_task, (), {}), '4718e7b8-12eb-51b7-a8fb-5a98dbdf20a1')
+        assert_equal(
+            default_unique_key_generator(unique_task, ('test', ), None),
+            'c89e99de-559c-5dac-b247-58ae40afc123'
+        )
+        assert_equal(
+            default_unique_key_generator(unique_task, None, {'test': ['test', 'test']}),
+            '00918486-5d65-5713-846f-7a3b75539a52'
+        )
 
     @override_settings(DJANGO_CELERY_EXTENSIONS_TASK_STALE_TIMELIMIT_FROM_TIME_LIMIT_CONSTANT=1.5)
     def test_stale_time_limit_should_be_computed_from_soft_time_limit(self):
