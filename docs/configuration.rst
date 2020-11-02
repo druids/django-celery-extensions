@@ -31,14 +31,14 @@ You can configure the library in Django settings. Following options are availabl
     Sleep time interval to check if schduler is still locked.
 
 
-* ``DJANGO_CELERY_EXTENSIONS_TASK_STALE_TIME_LIMIT`` (default: ``None``)
+* ``DJANGO_CELERY_EXTENSIONS_DEFAULT_TASK_STALE_TIME_LIMIT`` (default: ``None``)
 
     Default time of the task when it will be set as stale.
 
 
-* ``DJANGO_CELERY_EXTENSIONS_TASK_STALE_TIMELIMIT_FROM_TIME_LIMIT_CONSTANT`` (default: ``None``)
+* ``DJANGO_CELERY_EXTENSIONS_DEFAULT_TASK_MAX_QUEUE_WAITING_TIME`` (default: ``None``)
 
-    Value of ``task_stale_limit`` can be computed as a multiply of celery ``hard_time_limit``. Value of ``DJANGO_CELERY_EXTENSIONS_TASK_STALE_TIMELIMIT_FROM_TIME_LIMIT_CONSTANT`` must be greater than ``1``. Is recomended use value ``1.5``.
+    Maximal time which task will be waiting in the queue. Value of ``task_stale_limit`` can be computed from this value.
 
 
 * ``DJANGO_CELERY_EXTENSIONS_AUTO_GENERATE_TASKS_DJANGO_COMMANDS`` (default: ``{}``)

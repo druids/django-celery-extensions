@@ -2,7 +2,6 @@ import os
 import base64
 import logging
 import pickle
-import math
 
 import uuid
 
@@ -54,7 +53,6 @@ class DjangoTask(Task):
 
     abstract = True
 
-    stale_time_limit = None
     # Support set retry delay in list. Retry countdown value is get from list where index is attempt
     # number (request.retries)
     default_retry_delays = None
@@ -62,6 +60,14 @@ class DjangoTask(Task):
     unique = False
     unique_key_generator = default_unique_key_generator
     _stackprotected = True
+
+    @property
+    def max_queue_waiting_time(self):
+        return settings.DEFAULT_TASK_MAX_QUEUE_WAITING_TIME
+
+    @property
+    def stale_time_limit(self):
+        return settings.DEFAULT_TASK_STALE_TIME_LIMIT
 
     def on_start(self, args, kwargs):
         """
@@ -158,10 +164,20 @@ class DjangoTask(Task):
             return stale_time_limit
         elif self.stale_time_limit is not None:
             return self.stale_time_limit
-        elif settings.TASK_STALE_TIME_LIMIT is not None:
-            return settings.TASK_STALE_TIME_LIMIT
-        elif time_limit is not None and settings.TASK_STALE_TIMELIMIT_FROM_TIME_LIMIT_CONSTANT:
-            return math.ceil(time_limit * settings.TASK_STALE_TIMELIMIT_FROM_TIME_LIMIT_CONSTANT)
+        elif time_limit is not None and self.max_queue_waiting_time:
+            autoretry_for = getattr(self, 'autoretry_for', None)
+            if autoretry_for and self.default_retry_delays:
+                return (
+                    (time_limit + self.max_queue_waiting_time) * len(self.default_retry_delays) + 1
+                    + sum(self.default_retry_delays)
+                )
+            elif autoretry_for:
+                return (
+                    (time_limit + self.max_queue_waiting_time + self.default_retry_delay) * self.max_retries
+                    + time_limit + self.max_queue_waiting_time
+                )
+            else:
+                return time_limit + self.max_queue_waiting_time
         else:
             return None
 
