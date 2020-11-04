@@ -13,20 +13,20 @@ from django_celery_extensions.task import get_django_command_task, default_uniqu
 
 class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
 
-    @override_settings(DJANGO_CELERY_EXTENSIONS_TASK_STALE_TIME_LIMIT=None)
+    @override_settings(DJANGO_CELERY_EXTENSIONS_DEFAULT_TASK_STALE_TIME_LIMIT=None)
     def test_unique_task_shoud_have_set_stale_limit(self):
         with assert_raises(CeleryError):
             unique_task.delay()
-        with override_settings(DJANGO_CELERY_EXTENSIONS_TASK_STALE_TIME_LIMIT=10):
+        with override_settings(DJANGO_CELERY_EXTENSIONS_DEFAULT_TASK_STALE_TIME_LIMIT=10):
             with assert_not_raises(CeleryError):
                 unique_task.delay()
 
-    @override_settings(DJANGO_CELERY_EXTENSIONS_TASK_STALE_TIME_LIMIT=5)
+    @override_settings(DJANGO_CELERY_EXTENSIONS_DEFAULT_TASK_STALE_TIME_LIMIT=5)
     def test_apply_async_and_get_result_should_return_time_error_for_zero_timeout(self):
         with assert_raises(TimeoutError):
             unique_task.apply_async_and_get_result(timeout=0)
 
-    @override_settings(DJANGO_CELERY_EXTENSIONS_TASK_STALE_TIME_LIMIT=5)
+    @override_settings(DJANGO_CELERY_EXTENSIONS_DEFAULT_TASK_STALE_TIME_LIMIT=5)
     def test_apply_async_and_get_result_should_return_task_result(self):
         assert_equal(unique_task.apply_async_and_get_result(), 'unique')
 
@@ -50,7 +50,7 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
         get_django_command_task('create_user').apply_async()
         assert_true(User.objects.exists())
 
-    @override_settings(DJANGO_CELERY_EXTENSIONS_TASK_STALE_TIMELIMIT_FROM_TIME_LIMIT_CONSTANT=1.5)
+    @override_settings(DJANGO_CELERY_EXTENSIONS_DEFAULT_TASK_MAX_QUEUE_WAITING_TIME=1)
     def test_default_unique_key_generator_should_generate_unique_id_for_same_input(self):
         assert_equal(default_unique_key_generator(unique_task, None, None), '4718e7b8-12eb-51b7-a8fb-5a98dbdf20a1')
         assert_equal(default_unique_key_generator(sum_task, None, None), '57cd2e1f-1f40-5848-a88b-ba0124e09497')
@@ -66,6 +66,6 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
             '00918486-5d65-5713-846f-7a3b75539a52'
         )
 
-    @override_settings(DJANGO_CELERY_EXTENSIONS_TASK_STALE_TIMELIMIT_FROM_TIME_LIMIT_CONSTANT=1.5)
-    def test_stale_time_limit_should_be_computed_from_soft_time_limit(self):
+    @override_settings(DJANGO_CELERY_EXTENSIONS_DEFAULT_TASK_MAX_QUEUE_WAITING_TIME=1)
+    def test_stale_time_limit_should_be_computed_from_soft_time_limit_and_queue_waiting_time(self):
         assert_equal(unique_task.apply_async_and_get_result(), 'unique')
