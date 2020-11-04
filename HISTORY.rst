@@ -2,6 +2,13 @@
 History
 =======
 
+0.0.6 (2020-11-04)
+------------------
+
+* Fixed stale time limit computation.
+* Added max queue waiting time timeout.
+
+
 0.0.5 (2020-09-07)
 ------------------
 

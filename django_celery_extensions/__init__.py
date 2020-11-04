@@ -4,7 +4,7 @@
 
 __author__ = """Luboš Mátl"""
 __email__ = 'matllubos@gmail.com'
-__version__ = '0.0.5'
+__version__ = '0.0.6'
 
 
 default_app_config = 'django_celery_extensions.apps.DjangoCeleryExtensionsAppConfig'
