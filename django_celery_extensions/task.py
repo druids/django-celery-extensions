@@ -121,7 +121,7 @@ class DjangoTask(Task):
                 unique_task_id = cache.get(unique_key)
                 return (
                     unique_task_id if unique_task_id
-                    else self._get_unique_task_id(task_id, stale_time_limit)
+                    else self._get_unique_task_id(unique_key, task_id, stale_time_limit)
                 )
         else:
             return task_id
