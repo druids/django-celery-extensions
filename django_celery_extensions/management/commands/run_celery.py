@@ -7,7 +7,7 @@ from django.utils.autoreload import run_with_reloader
 
 
 def start_celery(celery_type, celery_settings, extra_arguments, autoreload=False):
-    starter_celery_cmd = 'celery {} -l info -A {} {}'.format(celery_type, celery_settings, extra_arguments)
+    starter_celery_cmd = 'celery --app {} {} {}'.format(celery_settings, celery_type, extra_arguments)
     if celery_type == 'worker' and hasattr(django_settings, 'CELERY_LISTEN_QUEUES'):
         starter_celery_cmd += ' -Q {}'.format(django_settings.CELERY_LISTEN_QUEUES)
 
