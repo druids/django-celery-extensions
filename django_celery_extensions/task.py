@@ -255,7 +255,8 @@ class DjangoTask(Task):
             raise ex
 
     def delay_on_commit(self, *args, **kwargs):
-        self.apply_async_on_commit(args, kwargs)
+        options = kwargs.pop('options', {})
+        self.apply_async_on_commit(args, kwargs, **options)
 
     def on_apply_retry(self, args, kwargs, exc, eta):
         """
