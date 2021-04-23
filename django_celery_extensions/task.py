@@ -9,8 +9,6 @@ import import_string
 
 from datetime import timedelta
 
-from distutils.version import StrictVersion
-
 from django.core.management import call_command, get_commands
 from django.core.exceptions import ImproperlyConfigured
 from django.core.cache import caches
@@ -19,7 +17,6 @@ from django.db.utils import InterfaceError, OperationalError
 from django.utils.timezone import now
 
 try:
-    from celery import VERSION as CELERY_VERSION
     from celery import Task, shared_task, current_app
     from celery.result import AsyncResult
     from celery.exceptions import CeleryError, TimeoutError
@@ -33,8 +30,6 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
-CELERY_VERSION = StrictVersion('.'.join((str(i) for i in CELERY_VERSION if i)))
-
 
 cache = caches[settings.CACHE_NAME]
 
@@ -47,6 +42,89 @@ def default_unique_key_generator(task, task_args, task_kwargs):
         (list(task_args), task_kwargs), task._get_app().conf.task_serializer,
     )
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, ':'.join((settings.KEY_PREFIX, task.name, data))))
+
+
+class NotTriggeredCeleryError(CeleryError):
+    pass
+
+
+class OnCommitAsyncResult:
+
+    def __init__(self):
+        self._result = None
+
+    def set_result(self, result):
+        self._result = result
+
+    def get(self, *args, **kwargs):
+        if self._result is None:
+            raise NotTriggeredCeleryError('Celery task has not been triggered yet')
+        else:
+            return self._result.get(*args, **kwargs)
+
+    @property
+    def state(self):
+        if self._result is None:
+            return 'WAITING'
+        else:
+            return self._result.state
+
+    def successful(self):
+        if self._result is None:
+            return False
+        else:
+            return self._result.successful()
+
+    def failed(self):
+        if self._result is None:
+            return False
+        else:
+            return self._result.failed()
+
+    @property
+    def task_id(self):
+        if self._result is None:
+            return None
+        else:
+            return self._result.task_id
+
+
+class AsyncResultWrapper:
+
+    def __init__(self, invocation_id, result, task, args, kwargs, options):
+        self._invocation_id = invocation_id
+        self._result = result
+        self._task = task
+        self._args = args
+        self._kwargs = kwargs
+        self._options = options
+
+    def set_result(self, result):
+        self._result = result
+
+    def get(self, *args, **kwargs):
+        try:
+            return self._result.get()
+        except TimeoutError as ex:
+            self.timeout(ex)
+            raise ex
+
+    def timeout(self, ex):
+        self._task.on_invocation_timeout(self._invocation_id, self._args, self._kwargs, self.task_id, ex, self._options)
+
+    @property
+    def state(self):
+        return self._result.state
+
+    def successful(self):
+        return self._result.successful()
+
+    def failed(self):
+        return self._result.failed()
+
+    @property
+    def task_id(self):
+        return self._result.task_id
 
 
 class DjangoTask(Task):
@@ -69,13 +147,101 @@ class DjangoTask(Task):
     def stale_time_limit(self):
         return settings.DEFAULT_TASK_STALE_TIME_LIMIT
 
-    def on_start(self, args, kwargs):
+    def on_invocation_apply(self, invocation_id, args, kwargs, options):
         """
-        On start task is invoked during task started.
-        :param args: task args
-        :param kwargs: task kwargs
+        Method is called when task was applied with the requester.
+        :param invocation_id: UUID of the requester invocation
+        :param args: input task args
+        :param kwargs: input task kwargs
+        :param options: input task options
         """
         pass
+
+    def on_invocation_trigger(self, invocation_id, args, kwargs, task_id, options):
+        """
+        Task has been triggered and placed in the queue.
+        :param invocation_id: UUID of the requester invocation
+        :param args: input task args
+        :param kwargs: input task kwargs
+        :param task_id: UUID of the celery task
+        :param options: input task options
+        """
+        pass
+
+    def on_invocation_unique(self, invocation_id, args, kwargs, task_id, options):
+        """
+        Task has been triggered but the same task is already active.
+        Therefore only pointer to the active task is returned.
+        :param invocation_id: UUID of the requester invocation
+        :param args: input task args
+        :param kwargs: input task kwargs
+        :param task_id: UUID of the celery task
+        :param options: input task options
+        """
+        pass
+
+    def on_invocation_timeout(self, invocation_id, args, kwargs, task_id, ex, options):
+        """
+        Task has been joined to another unique async result.
+        :param invocation_id: UUID of the requester invocation
+        :param args: input task args
+        :param kwargs: input task kwargs
+        :param task_id: UUID of the celery task
+        :param ex: celery TimeoutError
+        :param options: input task options
+        """
+        pass
+
+    def on_task_start(self, task_id, args, kwargs):
+        """
+        Task has been started with worker.
+        :param task_id: UUID of the celery task
+        :param args: input task args
+        :param kwargs: input task kwargs
+        """
+        pass
+
+    def on_task_retry(self, task_id, args, kwargs, exc, eta):
+        """
+        Task failed but will be retried.
+        :param task_id: UUID of the celery task
+        :param args: task args
+        :param kwargs: task kwargs
+        :param exc: raised exception which caused retry
+        :param eta: time to next retry
+        """
+        pass
+
+    def on_task_failure(self, task_id, args, kwargs, exc, einfo):
+        """
+        Task failed and will not be retried.
+        :param task_id: UUID of the celery task
+        :param args: task args
+        :param kwargs: task kwargs
+        :param exc: raised exception
+        :param einfo: exception traceback
+        """
+        pass
+
+    def on_task_success(self, task_id, args, kwargs, retval):
+        """
+        Task was successful.
+        :param task_id: UUID of the celery task
+        :param args: task args
+        :param kwargs: task kwargs
+        :param retval: task result
+        """
+        pass
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        super().on_failure(exc, task_id, args, kwargs, einfo)
+        self.on_task_failure(task_id, args, kwargs, exc, einfo)
+        self._clear_unique_key(args, kwargs)
+
+    def on_success(self, retval, task_id, args, kwargs):
+        super().on_success(retval, task_id, args, kwargs)
+        self.on_task_success(task_id, args, kwargs, retval)
+        self._clear_unique_key(args, kwargs)
 
     def __call__(self, *args, **kwargs):
         """
@@ -96,7 +262,7 @@ class DjangoTask(Task):
         req._protected = 1
 
         # Every set attr is sent here
-        self.on_start(args, kwargs)
+        self.on_task_start(req.id, args, kwargs)
         return self._start(*args, **kwargs)
 
     def _start(self, *args, **kwargs):
@@ -126,28 +292,20 @@ class DjangoTask(Task):
         else:
             return task_id
 
-    def on_failure(self, exc, task_id, args, kwargs, einfo):
-        super().on_failure(exc, task_id, args, kwargs, einfo)
-        self._clear_unique_key(args, kwargs)
-
-    def on_success(self, retval, task_id, args, kwargs):
-        super().on_success(retval, task_id, args, kwargs)
-        self._clear_unique_key(args, kwargs)
-
-    def _compute_eta(self, eta, countdown, apply_time):
+    def _compute_eta(self, eta, countdown, trigger_time):
         if countdown is not None:
-            return apply_time + timedelta(seconds=countdown)
+            return trigger_time + timedelta(seconds=countdown)
         elif eta:
             return eta
         else:
-            return apply_time
+            return trigger_time
 
-    def _compute_expires(self, expires, time_limit, stale_time_limit, apply_time):
+    def _compute_expires(self, expires, time_limit, stale_time_limit, trigger_time):
         expires = self.expires if expires is None else expires
         if expires is not None:
-            return apply_time + timedelta(seconds=expires) if isinstance(expires, int) else expires
+            return trigger_time + timedelta(seconds=expires) if isinstance(expires, int) else expires
         elif stale_time_limit is not None and time_limit is not None:
-            return apply_time + timedelta(seconds=stale_time_limit - time_limit)
+            return trigger_time + timedelta(seconds=stale_time_limit - time_limit)
         else:
             return None
 
@@ -159,7 +317,7 @@ class DjangoTask(Task):
         else:
             return self._get_app().conf.task_time_limit
 
-    def _get_stale_time_limit(self, expires, time_limit, stale_time_limit, apply_time):
+    def _get_stale_time_limit(self, expires, time_limit, stale_time_limit, trigger_time):
         if stale_time_limit is not None:
             return stale_time_limit
         elif self.stale_time_limit is not None:
@@ -181,73 +339,119 @@ class DjangoTask(Task):
         else:
             return None
 
-    def on_apply(self, task_id, apply_time, stale_time_limit, args, kwargs, options):
-        """
-        On apply task is invoked before task was prepared. Therefore task request context is not prepared.
-        :param task_id: uuid of the task
-        :param apply_time: datetime instance when task was applied
-        :param stale_time_limit: time limit in seconds to complete task
-        :param args: task args
-        :param kwargs: task kwargs
-        :param options: input task options
-        """
-        pass
+    def _apply_and_get_wrapped_result(self, args, kwargs, invocation_id, is_async=False, **options):
+        if is_async:
+            return AsyncResultWrapper(
+                invocation_id,
+                super().apply_async(
+                    args=args, kwargs=kwargs, is_async=is_async, invocation_id=invocation_id, **options
+                ),
+                self,
+                args,
+                kwargs,
+                options
+            )
+        else:
+            return AsyncResultWrapper(
+                invocation_id,
+                super().apply(
+                    args=args, kwargs=kwargs, is_async=is_async, invocation_id=invocation_id, **options
+                ),
+                self,
+                args,
+                kwargs,
+                options
+            )
 
-    def _first_apply(self, is_async, args=None, kwargs=None, task_id=None, eta=None,
-                     countdown=None, expires=None, time_limit=None, stale_time_limit=None, **options):
+    def _trigger(self, args, kwargs, invocation_id, task_id=None, eta=None, countdown=None, expires=None,
+                 time_limit=None, stale_time_limit=None, is_async=True, **options):
+        app = self._get_app()
+
         task_id = task_id or task_uuid()
-        apply_time = now()
-        time_limit = self._get_time_limit(time_limit)
 
-        eta = self._compute_eta(eta, countdown, apply_time)
+        time_limit = self._get_time_limit(time_limit)
+        trigger_time = now()
+        eta = self._compute_eta(eta, countdown, trigger_time)
         countdown = None
-        queue = str(options.get('queue', getattr(self, 'queue', self._get_app().conf.task_default_queue)))
-        stale_time_limit = self._get_stale_time_limit(expires, time_limit, stale_time_limit, apply_time)
-        expires = self._compute_expires(expires, time_limit, stale_time_limit, apply_time)
+        stale_time_limit = self._get_stale_time_limit(expires, time_limit, stale_time_limit, trigger_time)
+        expires = self._compute_expires(expires, time_limit, stale_time_limit, trigger_time)
 
         options.update(dict(
+            invocation_id=invocation_id,
+            task_id=task_id,
+            trigger_time=trigger_time,
             time_limit=time_limit,
             eta=eta,
             countdown=countdown,
-            queue=queue,
             expires=expires,
+            is_async=is_async,
+            stale_time_limit=stale_time_limit
         ))
+
         unique_key = self._get_unique_key(args, kwargs)
         unique_task_id = self._get_unique_task_id(unique_key, task_id, stale_time_limit)
 
         if is_async and unique_task_id != task_id:
-            return AsyncResult(unique_task_id, app=self._get_app())
-
-        self.on_apply(task_id, apply_time, stale_time_limit, args, kwargs, options)
-        if is_async:
-            return super().apply_async(task_id=task_id, args=args, kwargs=kwargs, **options)
-        else:
-            return super().apply(task_id=task_id, args=args, kwargs=kwargs, **options)
-
-    def apply_async_on_commit(self, args=None, kwargs=None, **options):
-        app = self._get_app()
-        if app.conf.task_always_eager:
-            self.apply_async(args=args, kwargs=kwargs, **options)
-        else:
-            self_inst = self
-            transaction.on_commit(
-                lambda: self_inst.apply_async(args=args, kwargs=kwargs, **options)
+            options['task_id'] = unique_task_id
+            self.on_invocation_unique(invocation_id, args, kwargs, unique_task_id, options)
+            return AsyncResultWrapper(
+                invocation_id,
+                AsyncResult(unique_task_id, app=app),
+                self,
+                args,
+                kwargs,
+                options
             )
+        else:
+            self.on_invocation_trigger(invocation_id, args, kwargs, task_id, options)
+            return self._apply_and_get_wrapped_result(args, kwargs, **options)
+
+    def _first_apply(self, args=None, kwargs=None, invocation_id=None, is_async=True, is_on_commit=False, using=None,
+                     **options):
+        invocation_id = invocation_id or task_uuid()
+
+        apply_time = now()
+        app = self._get_app()
+        queue = str(options.get('queue', getattr(self, 'queue', app.conf.task_default_queue)))
+
+        options.update(dict(
+            queue=queue,
+            is_async=is_async,
+            invocation_id=invocation_id,
+            apply_time=apply_time,
+            is_on_commit=is_on_commit,
+            using=using,
+        ))
+        self.on_invocation_apply(invocation_id, args, kwargs, options)
+
+        if is_on_commit:
+            on_commit_result = OnCommitAsyncResult()
+            self_inst = self
+
+            def _apply_on_commit():
+                result = self_inst._trigger(args=args, kwargs=kwargs, **options)
+                on_commit_result.set_result(result)
+            transaction.on_commit(_apply_on_commit, using=using)
+            return on_commit_result
+        else:
+            return self._trigger(args=args, kwargs=kwargs, **options)
+
+    def apply_async_on_commit(self, args=None, kwargs=None, using=None, **options):
+        return self._first_apply(args=args, kwargs=kwargs, is_async=True, is_on_commit=True, using=using, **options)
 
     def apply(self, args=None, kwargs=None, **options):
-        if 'retries' in options:
+        if 'retries' in options or 'is_async' in options:
             return super().apply(args=args, kwargs=kwargs, **options)
         else:
-            return self._first_apply(is_async=False, args=args, kwargs=kwargs, **options)
+            return self._first_apply(args=args, kwargs=kwargs, is_async=False, **options)
 
     def apply_async(self, args=None, kwargs=None, **options):
-        app = self._get_app()
         try:
-            if self.request.id or app.conf.task_always_eager:
+            if self.request.id:
                 return super().apply_async(args=args, kwargs=kwargs, **options)
             else:
                 return self._first_apply(
-                    is_async=True, args=args, kwargs=kwargs, **options,
+                    args=args, kwargs=kwargs, is_async=True, **options
                 )
         except (InterfaceError, OperationalError) as ex:
             logger.warn('Closing old database connections, following exception thrown: %s', str(ex))
@@ -258,20 +462,10 @@ class DjangoTask(Task):
         options = kwargs.pop('options', {})
         self.apply_async_on_commit(args, kwargs, **options)
 
-    def on_apply_retry(self, args, kwargs, exc, eta):
-        """
-        On retry task is invoked before task was retried.
-        :param args: task args
-        :param kwargs: task kwargs
-        :param exc: raised exception which caused retry
-        """
-        pass
-
     def retry(self, args=None, kwargs=None, exc=None, throw=True,
               eta=None, countdown=None, max_retries=None, default_retry_delays=None, **options):
-        if (default_retry_delays or (
-                max_retries is None and eta is None and countdown is None and max_retries is None
-                and self.default_retry_delays)):
+
+        if default_retry_delays or (eta is None and countdown is None and self.default_retry_delays):
             default_retry_delays = self.default_retry_delays if default_retry_delays is None else default_retry_delays
             max_retries = len(default_retry_delays)
             countdown = default_retry_delays[self.request.retries] if self.request.retries < max_retries else None
@@ -282,11 +476,7 @@ class DjangoTask(Task):
         if not eta:
             eta = now() + timedelta(seconds=countdown)
 
-        self.on_apply_retry(args, kwargs, exc, eta)
-
-        if CELERY_VERSION < StrictVersion('4.4.3'):
-            # Celery < 4.4.3 retry not working in eager mode. This simple hack fix it.
-            self.request.is_eager = False
+        self.on_task_retry(self.request.id, args, kwargs, exc, eta)
 
         return super().retry(
             args=args, kwargs=kwargs, exc=exc, throw=throw,
@@ -307,7 +497,9 @@ class DjangoTask(Task):
         if timeout is None or timeout > 0:
             return result.get(timeout=timeout, propagate=propagate)
         else:
-            raise TimeoutError('The operation timed out.')
+            ex = TimeoutError('The operation timed out.')
+            result.timeout(ex)
+            raise ex
 
     def get_command_kwargs(self):
         return {}

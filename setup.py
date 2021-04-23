@@ -40,7 +40,7 @@ setup(
     install_requires=[
         'django >= 2.2.14',
         'import_string >= 0.1.0',
-        'celery >= 5.0.0',
+        'celery >= 5.0.5',
         'attrdict >= 2.0.0',
     ],
     zip_safe=False
