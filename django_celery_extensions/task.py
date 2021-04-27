@@ -126,6 +126,10 @@ class AsyncResultWrapper:
     def task_id(self):
         return self._result.task_id
 
+    @property
+    def id(self):
+        return self._result.id
+
 
 class DjangoTask(Task):
 
