@@ -102,6 +102,9 @@ class AsyncResultWrapper:
     def set_result(self, result):
         self._result = result
 
+    def then(self, *args, **kwargs):
+        return self._result.then(*args, **kwargs)
+
     def get(self, *args, **kwargs):
         try:
             return self._result.get()
