@@ -49,3 +49,7 @@ You can configure the library in Django settings. Following options are availabl
 * ``DJANGO_CELERY_EXTENSIONS_AUTO_GENERATE_TASKS_DEFAULT_CELERY_KWARGS`` (default: ``{}``)
 
     Default celery task kwargs which will be used for auto generated tasks from django commands.
+
+* ``AUTO_SQS_MESSAGE_GROUP_ID_FROM_TASK_NAME`` (default: ``False``)
+
+    Whether to automatically set `MessageGroupId <https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/using-messagegroupid-property.html>` to Celery task name or not.
