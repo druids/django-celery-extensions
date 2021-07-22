@@ -145,6 +145,7 @@ class DjangoTask(Task):
     unique = False
     unique_key_generator = default_unique_key_generator
     _stackprotected = True
+    
 
     @property
     def max_queue_waiting_time(self):
@@ -317,8 +318,11 @@ class DjangoTask(Task):
             return None
 
     def _get_time_limit(self, time_limit):
+        # TODO check
         if time_limit is not None:
             return time_limit
+        elif self.time_limit is not None:
+            return self.time_limit
         elif self.soft_time_limit is not None:
             return self.soft_time_limit
         else:
@@ -372,6 +376,7 @@ class DjangoTask(Task):
 
     def _trigger(self, args, kwargs, invocation_id, task_id=None, eta=None, countdown=None, expires=None,
                  time_limit=None, stale_time_limit=None, is_async=True, **options):
+
         app = self._get_app()
 
         task_id = task_id or task_uuid()
@@ -388,6 +393,8 @@ class DjangoTask(Task):
             task_id=task_id,
             trigger_time=trigger_time,
             time_limit=time_limit,
+            # todo get from settings if is set
+            soft_time_limit=self.soft_time_limit,
             eta=eta,
             countdown=countdown,
             expires=expires,
@@ -529,28 +536,39 @@ def get_django_command_task(command_name):
 
 
 def auto_convert_commands_to_tasks():
-    for name in get_commands():
-        if name in settings.AUTO_GENERATE_TASKS_DJANGO_COMMANDS:
-            def generate_command_task(command_name):
-                shared_task_kwargs = dict(
+    for name in settings.AUTO_GENERATE_TASKS_DJANGO_COMMANDS:
+        if name not in get_commands():
+            raise ImproperlyConfigured('Cannot generate celery task from command "{}", command not found'.format(name))
+        app_name = get_commands()[name]
+        task_name = 'command.{}.{}'.format(app_name, name)
+        def generate_command_task(command_name, task_name):
+            shared_task_kwargs = dict(
+                **dict(
                     base=import_string(settings.AUTO_GENERATE_TASKS_BASE),
                     bind=True,
-                    name=command_name,
+                    name=task_name,
                     ignore_result=True,
-                    **settings.AUTO_GENERATE_TASKS_DEFAULT_CELERY_KWARGS
-                )
-                shared_task_kwargs.update(settings.AUTO_GENERATE_TASKS_DJANGO_COMMANDS[command_name])
+                    unique=True
+                ),
+                **settings.AUTO_GENERATE_TASKS_DEFAULT_CELERY_KWARGS,
+                **settings.AUTO_GENERATE_TASKS_DJANGO_COMMANDS[command_name]
+            )
+            if 'autoretry_for' in shared_task_kwargs:
+                shared_task_kwargs['autoretry_for'] = [
+                    import_string(exception_class) if isinstance(exception_class, str) else exception_class
+                    for exception_class in shared_task_kwargs['autoretry_for']
+                ]
 
-                @shared_task(
-                    **shared_task_kwargs
+            @shared_task(
+                **shared_task_kwargs
+            )
+            def command_task(self, command_args=None, **kwargs):
+                command_args = [] if command_args is None else command_args
+                call_command(
+                    command_name,
+                    settings=os.environ.get('DJANGO_SETTINGS_MODULE'),
+                    *command_args,
+                    **self.get_command_kwargs()
                 )
-                def command_task(self, command_args=None, **kwargs):
-                    command_args = [] if command_args is None else command_args
-                    call_command(
-                        command_name,
-                        settings=os.environ.get('DJANGO_SETTINGS_MODULE'),
-                        *command_args,
-                        **self.get_command_kwargs()
-                    )
 
-            generate_command_task(name)
+        generate_command_task(name, task_name)
