@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 class LockedPersistentScheduler(PersistentScheduler):
 
     lock = None
-    lock_key = ':'.join((settings.KEY_PREFIX, settings.LOCK_KEY))
+    lock_key = settings.BEATER_LOCK_KEY
     lock_timeout = settings.LOCK_TIMEOUT
     lock_sleep = settings.LOCK_SLEEP
 

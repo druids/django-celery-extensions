@@ -11,12 +11,14 @@ from django.utils.timezone import now
 from germanium.test_cases.default import GermaniumTestCase
 from germanium.tools import (
     assert_equal, assert_not_raises, assert_raises, assert_is_none, assert_true, assert_is_not_none,
-    capture_on_commit_callbacks
+    capture_on_commit_callbacks, assert_false
 )
 
 from freezegun import freeze_time
 
-from app.tasks import error_task, retry_task, sum_task, unique_task
+from app.tasks import (
+    error_task, retry_task, sum_task, unique_task, ignored_after_success_task, ignored_after_error_task
+)
 
 from django_celery_extensions.task import (
     get_django_command_task, default_unique_key_generator, NotTriggeredCeleryError, AsyncResultWrapper
@@ -68,18 +70,32 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
 
     @override_settings(DJANGO_CELERY_EXTENSIONS_DEFAULT_TASK_MAX_QUEUE_WAITING_TIME=1)
     def test_default_unique_key_generator_should_generate_unique_id_for_same_input(self):
-        assert_equal(default_unique_key_generator(unique_task, None, None), '4718e7b8-12eb-51b7-a8fb-5a98dbdf20a1')
-        assert_equal(default_unique_key_generator(sum_task, None, None), '57cd2e1f-1f40-5848-a88b-ba0124e09497')
-        assert_equal(default_unique_key_generator(unique_task, (), None), '4718e7b8-12eb-51b7-a8fb-5a98dbdf20a1')
-        assert_equal(default_unique_key_generator(unique_task, None, {}), '4718e7b8-12eb-51b7-a8fb-5a98dbdf20a1')
-        assert_equal(default_unique_key_generator(unique_task, (), {}), '4718e7b8-12eb-51b7-a8fb-5a98dbdf20a1')
         assert_equal(
-            default_unique_key_generator(unique_task, ('test', ), None),
-            'c89e99de-559c-5dac-b247-58ae40afc123'
+            default_unique_key_generator(unique_task, 'prefix', None, None), 'b0f110da-8416-5ab7-853b-40813c011779'
         )
         assert_equal(
-            default_unique_key_generator(unique_task, None, {'test': ['test', 'test']}),
-            '00918486-5d65-5713-846f-7a3b75539a52'
+            default_unique_key_generator(sum_task, 'prefix', None, None), '309a345e-7ee6-5d0b-9f61-50b6d51eb67d'
+        )
+        assert_equal(
+            default_unique_key_generator(unique_task, 'prefix', (), None), 'b0f110da-8416-5ab7-853b-40813c011779'
+        )
+        assert_equal(
+            default_unique_key_generator(unique_task, 'prefix', None, {}), 'b0f110da-8416-5ab7-853b-40813c011779'
+        )
+        assert_equal(
+            default_unique_key_generator(unique_task, 'prefix', (), {}), 'b0f110da-8416-5ab7-853b-40813c011779'
+        )
+        assert_equal(
+            default_unique_key_generator(unique_task, 'prefix', ('test', ), None),
+            '06317eeb-ea14-5572-82e2-658ec53e7652'
+        )
+        assert_equal(
+            default_unique_key_generator(unique_task, 'prefix', None, {'test': ['test', 'test']}),
+            'a74865e9-7047-505c-a2ee-fda16a92e780'
+        )
+        assert_equal(
+            default_unique_key_generator(unique_task, 'another_prefix', (), {}),
+            'e5e7b393-4ee2-5053-af96-49c48a2a6855'
         )
 
     @override_settings(DJANGO_CELERY_EXTENSIONS_DEFAULT_TASK_MAX_QUEUE_WAITING_TIME=1)
@@ -142,6 +158,7 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
                         'task_id': 'test task',
                         'trigger_time': now(),
                         'time_limit': 300,
+                        'soft_time_limit': 120,
                         'eta': now(),
                         'countdown': None,
                         'expires': None,
@@ -165,6 +182,7 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
                     'task_id': 'test task',
                     'trigger_time': now(),
                     'time_limit': 300,
+                    'soft_time_limit': 120,
                     'eta': now(),
                     'countdown': None,
                     'expires': None,
@@ -189,6 +207,7 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
                         'task_id': 'test task',
                         'trigger_time': now(),
                         'time_limit': 300,
+                        'soft_time_limit': 120,
                         'eta': now(),
                         'countdown': None,
                         'expires': now() + timedelta(seconds=1),
@@ -218,6 +237,7 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
                         'task_id': 'test task',
                         'trigger_time': now(),
                         'time_limit': 300,
+                        'soft_time_limit': 120,
                         'eta': now(),
                         'countdown': None,
                         'expires': now() + timedelta(seconds=1),
@@ -292,3 +312,25 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
                 assert_equal(
                     call_args[0], ('test task', None, None, call_args[0][3], now() + timedelta(seconds=delay))
                 )
+
+    def test_ignored_after_success_task_should_be_ignored_for_second_call(self):
+        success_result = ignored_after_success_task.delay()
+        assert_equal(success_result.state, 'SUCCESS')
+        assert_equal(success_result.get(), 'ignored_task_after_success')
+
+        ignored_result = ignored_after_success_task.delay()
+        assert_equal(ignored_result.state, 'IGNORED')
+        assert_is_none(ignored_result.get())
+        assert_false(ignored_result.successful())
+        assert_false(ignored_result.failed())
+        assert_is_none(ignored_result.task_id)
+
+        with freeze_time(now() + timedelta(hours=1)):
+            assert_equal(ignored_after_success_task.delay().state, 'IGNORED')
+
+        with freeze_time(now() + timedelta(hours=1, minutes=5)):
+            assert_equal(ignored_after_success_task.delay().state, 'SUCCESS')
+
+    def test_ignored_after_error_task_should_be_ignored_for_second_call(self):
+        assert_equal(ignored_after_error_task.delay().state, 'FAILURE')
+        assert_equal(ignored_after_error_task.delay().state, 'FAILURE')

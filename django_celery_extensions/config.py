@@ -7,15 +7,16 @@ from celery.beat import DEFAULT_MAX_INTERVAL
 
 DEFAULTS = {
     'CACHE_NAME': 'default',
-    'KEY_PREFIX': 'django-celery-extensions',
-    'LOCK_KEY': 'lock',
+    'UNIQUE_TASK_KEY_PREFIX': 'django-celery-extensions|unique',
+    'IGNORE_TASK_AFTER_SUCCESS_KEY_PREFIX': 'django-celery-extensions|ignore-after-success',
+    'BEATER_LOCK_KEY': 'django-celery-extensions|lock',
     'LOCK_TIMEOUT': DEFAULT_MAX_INTERVAL * 5,
     'LOCK_SLEEP':  DEFAULT_MAX_INTERVAL,
     'DEFAULT_TASK_STALE_TIME_LIMIT': None,
     'DEFAULT_TASK_MAX_QUEUE_WAITING_TIME': None,
     'AUTO_GENERATE_TASKS_DJANGO_COMMANDS': {},
     'AUTO_GENERATE_TASKS_BASE': 'django_celery_extensions.task.DjangoTask',
-    'AUTO_GENERATE_TASKS_DEFAULT_CELERY_KWARGS': {},
+    'AUTO_GENERATE_TASKS_DEFAULT_CELERY_KWARGS': None,
 }
 
 

@@ -78,6 +78,27 @@ If you want to call the command tasky by hand, you can use ``get_django_command_
     get_django_command_task('clearsessions').delay_on_commit()
 
 
+Some tasks can be run only once per specific time. For this purpose you can use ``ignore_task_after_success_timedelta``::
+
+    @celery_app.task(
+        base=DjangoTask,
+        bind=True,
+        ignore_task_after_success_timedelta=timedelta(hours=5))
+    def notify_user(self, user_pk):
+        user = User.objects.get(pk=user_pk)
+        was_notified = notify(user)
+        return was_notified
+
+Now ``notify_user`` task will be ignored for 5 hours after the last successful completion::
+
+    notify_user.delay(5).state  # result will be SUCCESS
+    notify_user.delay(5).state  # result will be IGNORED
+    # wait 5 hours
+    notify_user.delay(5).state  # result will be SUCCESS
+
+If task ends in failure state it can be run again and will not be ignored. 
+
+
 Beater
 ------
 

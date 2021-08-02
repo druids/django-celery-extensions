@@ -34,18 +34,36 @@ logger = logging.getLogger(__name__)
 cache = caches[settings.CACHE_NAME]
 
 
-def default_unique_key_generator(task, task_args, task_kwargs):
+def default_unique_key_generator(task, prefix, task_args, task_kwargs):
     task_args = task_args or ()
     task_kwargs = task_kwargs or {}
 
     _, _, data = serialization.dumps(
         (list(task_args), task_kwargs), task._get_app().conf.task_serializer,
     )
-    return str(uuid.uuid5(uuid.NAMESPACE_DNS, ':'.join((settings.KEY_PREFIX, task.name, data))))
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, ':'.join((prefix, task.name, data))))
 
 
 class NotTriggeredCeleryError(CeleryError):
     pass
+
+
+class IgnoredResult:
+
+    state = 'IGNORED'
+
+    def get(self, *args, **kwargs):
+        return None
+
+    def successful(self):
+        return False
+
+    def failed(self):
+        return False
+
+    @property
+    def task_id(self):
+        return None
 
 
 class OnCommitAsyncResult:
@@ -145,7 +163,8 @@ class DjangoTask(Task):
     unique = False
     unique_key_generator = default_unique_key_generator
     _stackprotected = True
-    
+
+    ignore_task_after_success_timedelta = None
 
     @property
     def max_queue_waiting_time(self):
@@ -180,6 +199,19 @@ class DjangoTask(Task):
         """
         Task has been triggered but the same task is already active.
         Therefore only pointer to the active task is returned.
+        :param invocation_id: UUID of the requester invocation
+        :param args: input task args
+        :param kwargs: input task kwargs
+        :param task_id: UUID of the celery task
+        :param options: input task options
+        """
+        pass
+
+    def on_invocation_ignored(self, invocation_id, args, kwargs, task_id, options):
+        """
+        Task has been triggered but the task has set ignore_task_after_success_timedelta
+        and task was sucessfully completed in this timeout.
+        Therefore no new task is invoked.
         :param invocation_id: UUID of the requester invocation
         :param args: input task args
         :param kwargs: input task kwargs
@@ -250,6 +282,7 @@ class DjangoTask(Task):
         super().on_success(retval, task_id, args, kwargs)
         self.on_task_success(task_id, args, kwargs, retval)
         self._clear_unique_key(args, kwargs)
+        self._set_ignore_task_after_success(args, kwargs)
 
     def __call__(self, *args, **kwargs):
         """
@@ -277,10 +310,33 @@ class DjangoTask(Task):
         return self.run(*args, **kwargs)
 
     def _get_unique_key(self, task_args, task_kwargs):
-        return self.unique_key_generator(task_args, task_kwargs) if self.unique else None
+        return self.unique_key_generator(
+            settings.UNIQUE_TASK_KEY_PREFIX, task_args, task_kwargs
+        ) if self.unique else None
 
-    def _clear_unique_key(self, task_args, task_kwarg):
-        unique_key = self._get_unique_key(task_args, task_kwarg)
+    def _get_ignore_task_after_success_key(self, task_args, task_kwargs):
+        return (
+            self.unique_key_generator(
+                settings.IGNORE_TASK_AFTER_SUCCESS_KEY_PREFIX, task_args, task_kwargs
+            )
+            if self.ignore_task_after_success_timedelta else None
+        )
+
+    def _ignore_task_after_success(self, key):
+        return key and cache.get(key)
+
+    def _set_ignore_task_after_success(self, task_args, task_kwargs):
+        ignore_task_after_success_key = self._get_ignore_task_after_success_key(task_args, task_kwargs)
+        if ignore_task_after_success_key:
+            current_time = now()
+            cache.add(
+                ignore_task_after_success_key,
+                True,
+                (current_time + self.ignore_task_after_success_timedelta - current_time).total_seconds()
+            )
+
+    def _clear_unique_key(self, task_args, task_kwargs):
+        unique_key = self._get_unique_key(task_args, task_kwargs)
         if unique_key:
             cache.delete(unique_key)
 
@@ -318,15 +374,20 @@ class DjangoTask(Task):
             return None
 
     def _get_time_limit(self, time_limit):
-        # TODO check
         if time_limit is not None:
             return time_limit
         elif self.time_limit is not None:
             return self.time_limit
+        else:
+            return self._get_app().conf.task_time_limit
+
+    def _get_soft_time_limit(self, soft_time_limit):
+        if soft_time_limit is not None:
+            return soft_time_limit
         elif self.soft_time_limit is not None:
             return self.soft_time_limit
         else:
-            return self._get_app().conf.task_time_limit
+            return self._get_app().conf.task_soft_time_limit
 
     def _get_stale_time_limit(self, expires, time_limit, stale_time_limit, trigger_time):
         if stale_time_limit is not None:
@@ -375,7 +436,7 @@ class DjangoTask(Task):
             )
 
     def _trigger(self, args, kwargs, invocation_id, task_id=None, eta=None, countdown=None, expires=None,
-                 time_limit=None, stale_time_limit=None, is_async=True, **options):
+                 time_limit=None, soft_time_limit=None, stale_time_limit=None, is_async=True, **options):
 
         app = self._get_app()
 
@@ -393,14 +454,19 @@ class DjangoTask(Task):
             task_id=task_id,
             trigger_time=trigger_time,
             time_limit=time_limit,
-            # todo get from settings if is set
-            soft_time_limit=self.soft_time_limit,
+            soft_time_limit=self._get_soft_time_limit(soft_time_limit),
             eta=eta,
             countdown=countdown,
             expires=expires,
             is_async=is_async,
             stale_time_limit=stale_time_limit
         ))
+
+        ignore_task_after_success_key = self._get_ignore_task_after_success_key(args, kwargs)
+
+        if self._ignore_task_after_success(ignore_task_after_success_key):
+            self.on_invocation_ignored(invocation_id, args, kwargs, task_id, options)
+            return IgnoredResult()
 
         unique_key = self._get_unique_key(args, kwargs)
         unique_task_id = self._get_unique_task_id(unique_key, task_id, stale_time_limit)
@@ -468,7 +534,7 @@ class DjangoTask(Task):
                     args=args, kwargs=kwargs, is_async=True, **options
                 )
         except (InterfaceError, OperationalError) as ex:
-            logger.warn('Closing old database connections, following exception thrown: %s', str(ex))
+            logger.warning('Closing old database connections, following exception thrown: %s', str(ex))
             close_old_connections()
             raise ex
 
@@ -527,32 +593,36 @@ def string_to_obj(obj_string):
     return pickle.loads(base64.decodebytes(obj_string.encode('utf8')))
 
 
+def get_command_task_name(command_name):
+    if command_name not in get_commands():
+        raise ImproperlyConfigured('Cannot generate celery task from command "{}", command not found'.format(name))
+    app_name = get_commands()[command_name]
+    return 'command.{}.{}'.format(app_name, command_name)
+
+
 def get_django_command_task(command_name):
-    if command_name not in current_app.tasks:
+    command_task_name = get_command_task_name(command_name)
+    if command_task_name not in current_app.tasks:
         raise ImproperlyConfigured(
             'Command was not found please check DJANGO_CELERY_EXTENSIONS_AUTO_GENERATE_TASKS_DJANGO_COMMANDS setting'
         )
-    return current_app.tasks[command_name]
+    return current_app.tasks[command_task_name]
 
 
 def auto_convert_commands_to_tasks():
     for name in settings.AUTO_GENERATE_TASKS_DJANGO_COMMANDS:
-        if name not in get_commands():
-            raise ImproperlyConfigured('Cannot generate celery task from command "{}", command not found'.format(name))
-        app_name = get_commands()[name]
-        task_name = 'command.{}.{}'.format(app_name, name)
+        task_name = get_command_task_name(name)
         def generate_command_task(command_name, task_name):
-            shared_task_kwargs = dict(
+            shared_task_kwargs = {
                 **dict(
                     base=import_string(settings.AUTO_GENERATE_TASKS_BASE),
                     bind=True,
                     name=task_name,
                     ignore_result=True,
-                    unique=True
                 ),
-                **settings.AUTO_GENERATE_TASKS_DEFAULT_CELERY_KWARGS,
-                **settings.AUTO_GENERATE_TASKS_DJANGO_COMMANDS[command_name]
-            )
+                **(settings.AUTO_GENERATE_TASKS_DEFAULT_CELERY_KWARGS or {}),
+                **(settings.AUTO_GENERATE_TASKS_DJANGO_COMMANDS[command_name] or {})
+            }
             if 'autoretry_for' in shared_task_kwargs:
                 shared_task_kwargs['autoretry_for'] = [
                     import_string(exception_class) if isinstance(exception_class, str) else exception_class
