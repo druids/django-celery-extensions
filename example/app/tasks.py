@@ -1,5 +1,7 @@
 from settings.celery import app as celery_app
 
+from datetime import timedelta
+
 from django_celery_extensions.task import DjangoTask
 
 
@@ -39,3 +41,21 @@ def retry_task(self):
     unique=True)
 def unique_task(self):
     return 'unique'
+
+
+@celery_app.task(
+    base=DjangoTask,
+    bind=True,
+    name='ignored_after_success_task',
+    ignore_task_after_success_timedelta=timedelta(hours=1, minutes=5))
+def ignored_after_success_task(self):
+    return 'ignored_task_after_success'
+
+
+@celery_app.task(
+    base=DjangoTask,
+    bind=True,
+    name='ignored_after_error_task',
+    ignore_task_after_success_timedelta=timedelta(hours=1, minutes=5))
+def ignored_after_error_task(self):
+    raise RuntimeError('error')
