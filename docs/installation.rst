@@ -60,3 +60,26 @@ Once installed, add the library to ``INSTALLED_APPS`` in your Django project set
         ...
         'django_celery_extensions',
     ]
+
+For your celery configuration use ``django_celery_extensions.celery.Celery`` class::
+
+    from django_celery_extensions.celery import Celery
+
+
+    app = Celery('example')
+
+You can use ``django_celery_extensions.celery.CeleryQueueEnum`` to define default configuration for tasks in this queue::
+
+
+    from django_celery_extensions.celery import CeleryQueueEnum
+
+    class CeleryQueue(CeleryQueueEnum):
+        FAST = ('fast', {'time_limit': 10})
+
+
+You can now define task and set the right queue::
+
+    @celery_app.task(
+        queue=CeleryQueue.FAST)
+    def task_with_fast_queue():
+        return 'result'

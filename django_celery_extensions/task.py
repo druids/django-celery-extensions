@@ -527,8 +527,7 @@ class DjangoTask(Task):
 
     def apply_async(self, args=None, kwargs=None, **options):
         if settings.AUTO_SQS_MESSAGE_GROUP_ID_FROM_TASK_NAME:
-            if 'properties' not in options:
-                options['properties'] = {}
+            options['properties'] = options.get('properties', {})
             if 'MessageGroupId' not in options['properties']:
                 options['properties']['MessageGroupId'] = self.name
 

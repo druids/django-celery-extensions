@@ -1,4 +1,5 @@
-from celery import Celery
+from django_celery_extensions.celery import Celery, CeleryQueueEnum
+
 
 app = Celery('example')
 
@@ -6,3 +7,8 @@ app = Celery('example')
 # pickle the object when using Windows.
 app.config_from_object('django.conf:settings')
 app.autodiscover_tasks()
+
+
+class CeleryQueue(CeleryQueueEnum):
+
+    FAST = ('fast', {'time_limit': 10})

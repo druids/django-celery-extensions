@@ -17,7 +17,8 @@ from germanium.tools import (
 from freezegun import freeze_time
 
 from app.tasks import (
-    error_task, retry_task, sum_task, unique_task, ignored_after_success_task, ignored_after_error_task
+    error_task, retry_task, sum_task, unique_task, ignored_after_success_task, ignored_after_error_task,
+    task_with_fast_queue
 )
 
 from django_celery_extensions.task import (
@@ -334,3 +335,31 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
     def test_ignored_after_error_task_should_be_ignored_for_second_call(self):
         assert_equal(ignored_after_error_task.delay().state, 'FAILURE')
         assert_equal(ignored_after_error_task.delay().state, 'FAILURE')
+
+    @freeze_time(now())
+    def test_task_with_fast_queue_should_have_set_time_limit_from_queue_settings(self):
+        with patch.object(task_with_fast_queue, 'on_invocation_trigger') as mocked_method:
+            task_with_fast_queue.apply(invocation_id='test invocation', task_id='test task')
+
+            mocked_method.assert_called_with(
+                    'test invocation',
+                    None,
+                    None,
+                    'test task',
+                    {
+                        'queue': 'fast',
+                        'apply_time': now(),
+                        'is_on_commit': False,
+                        'is_async': False,
+                        'invocation_id': 'test invocation',
+                        'task_id': 'test task',
+                        'trigger_time': now(),
+                        'time_limit': 10,
+                        'soft_time_limit': 120,
+                        'eta': now(),
+                        'countdown': None,
+                        'expires': None,
+                        'stale_time_limit': None,
+                        'using': None,
+                    }
+                )

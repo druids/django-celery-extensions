@@ -1,12 +1,10 @@
 from settings.celery import app as celery_app
+from settings.celery import CeleryQueue
 
 from datetime import timedelta
 
-from django_celery_extensions.task import DjangoTask
-
 
 @celery_app.task(
-    base=DjangoTask,
     bind=True,
     name='sum_task')
 def sum_task(self, a, b):
@@ -14,7 +12,6 @@ def sum_task(self, a, b):
 
 
 @celery_app.task(
-    base=DjangoTask,
     bind=True,
     name='error_task',
     stale_time_limit=60 * 60)
@@ -23,7 +20,6 @@ def error_task(self):
 
 
 @celery_app.task(
-    base=DjangoTask,
     bind=True,
     name='retry_task',
     autoretry_for=(RuntimeError,),
@@ -35,7 +31,6 @@ def retry_task(self):
 
 
 @celery_app.task(
-    base=DjangoTask,
     bind=True,
     name='unique_task',
     unique=True)
@@ -44,7 +39,6 @@ def unique_task(self):
 
 
 @celery_app.task(
-    base=DjangoTask,
     bind=True,
     name='ignored_after_success_task',
     ignore_task_after_success_timedelta=timedelta(hours=1, minutes=5))
@@ -53,9 +47,14 @@ def ignored_after_success_task(self):
 
 
 @celery_app.task(
-    base=DjangoTask,
     bind=True,
     name='ignored_after_error_task',
     ignore_task_after_success_timedelta=timedelta(hours=1, minutes=5))
 def ignored_after_error_task(self):
     raise RuntimeError('error')
+
+
+@celery_app.task(
+    queue=CeleryQueue.FAST)
+def task_with_fast_queue():
+    return 'result'
