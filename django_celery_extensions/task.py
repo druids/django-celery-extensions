@@ -51,6 +51,7 @@ class NotTriggeredCeleryError(CeleryError):
 class IgnoredResult:
 
     state = 'IGNORED'
+    id = None
 
     def get(self, *args, **kwargs):
         return None
@@ -63,7 +64,7 @@ class IgnoredResult:
 
     @property
     def task_id(self):
-        return None
+        return self.id
 
 
 class OnCommitAsyncResult:
@@ -100,11 +101,12 @@ class OnCommitAsyncResult:
             return self._result.failed()
 
     @property
+    def id(self):
+        return None if self._result is None else self._result.task_id
+
+    @property
     def task_id(self):
-        if self._result is None:
-            return None
-        else:
-            return self._result.task_id
+        return self.id
 
 
 class AsyncResultWrapper:
