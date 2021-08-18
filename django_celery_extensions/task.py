@@ -14,7 +14,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.core.cache import caches
 from django.db import close_old_connections, transaction
 from django.db.utils import InterfaceError, OperationalError
-from django.utils.timezone import now
+from django.utils.timezone import now, localtime
 
 try:
     from celery import Task, shared_task, current_app
@@ -330,7 +330,7 @@ class DjangoTask(Task):
     def _set_ignore_task_after_success(self, task_args, task_kwargs):
         ignore_task_after_success_key = self._get_ignore_task_after_success_key(task_args, task_kwargs)
         if ignore_task_after_success_key:
-            current_time = now()
+            current_time = localtime()
             cache.add(
                 ignore_task_after_success_key,
                 True,
