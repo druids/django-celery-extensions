@@ -528,6 +528,11 @@ class DjangoTask(Task):
             return self._first_apply(args=args, kwargs=kwargs, is_async=False, **options)
 
     def apply_async(self, args=None, kwargs=None, **options):
+        if settings.AUTO_SQS_MESSAGE_GROUP_ID_FROM_TASK_NAME:
+            options['properties'] = options.get('properties', {})
+            if 'MessageGroupId' not in options['properties']:
+                options['properties']['MessageGroupId'] = self.name
+
         try:
             if self.request.id:
                 return super().apply_async(args=args, kwargs=kwargs, **options)
