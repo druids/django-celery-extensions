@@ -417,7 +417,7 @@ class DjangoTask(Task):
         if is_async:
             return AsyncResultWrapper(
                 invocation_id,
-                super().apply_async(
+                self._call_super_apply_async(
                     args=args, kwargs=kwargs, is_async=is_async, invocation_id=invocation_id, **options
                 ),
                 self,
@@ -527,15 +527,24 @@ class DjangoTask(Task):
         else:
             return self._first_apply(args=args, kwargs=kwargs, is_async=False, **options)
 
-    def apply_async(self, args=None, kwargs=None, **options):
-        if settings.AUTO_SQS_MESSAGE_GROUP_ID_FROM_TASK_NAME:
+    def _call_super_apply_async(self, args=None, kwargs=None, task_id=None, **options):
+        """
+        Apply async can be called from two sources. By hand from executor or automatically via retry function.
+        If retry function is used id is get from request. But we sometimes we need to change options before it
+        (some options is not transfered to the worker for example properties, therefore not all changed options in
+        _first_apply method is available in retry method)
+        """
+        task_id = task_id or self.request.id or uuid()
+        if settings.AUTO_SQS_MESSAGE_GROUP_ID:
             options['properties'] = options.get('properties', {})
             if 'MessageGroupId' not in options['properties']:
-                options['properties']['MessageGroupId'] = self.name
+                options['properties']['MessageGroupId'] = task_id
+        return super().apply_async(args=args, kwargs=kwargs, task_id=task_id, **options)
 
+    def apply_async(self, args=None, kwargs=None, **options):
         try:
             if self.request.id:
-                return super().apply_async(args=args, kwargs=kwargs, **options)
+                return self._call_super_apply_async(args=args, kwargs=kwargs, **options)
             else:
                 return self._first_apply(
                     args=args, kwargs=kwargs, is_async=True, **options
