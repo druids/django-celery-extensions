@@ -68,38 +68,64 @@ class IgnoredResult:
         return self.id
 
 
-class OnCommitAsyncResult:
+class ResultWrapper:
 
-    def __init__(self):
-        self._result = None
+    def __init__(self, invocation_id, task, args, kwargs, options, result=None):
+        self._invocation_id = invocation_id
+        self._result = result
+        self._task = task
+        self._args = args
+        self._kwargs = kwargs
+        self._options = options
+
+    def on_apply(self):
+        pass
+
+    def on_trigger(self):
+        pass
+
+    def on_unique(self):
+        pass
+
+    def on_ignored(self):
+        pass
+
+    def on_timeout(self):
+        pass
 
     def set_result(self, result):
         self._result = result
+
+    def set_options(self, options):
+        self._options = options
+
+    def then(self, *args, **kwargs):
+        return self._result.then(*args, **kwargs)
 
     def get(self, *args, **kwargs):
         if self._result is None:
             raise NotTriggeredCeleryError('Celery task has not been triggered yet')
         else:
-            return self._result.get(*args, **kwargs)
+            try:
+                return self._result.get(*args, **kwargs)
+            except TimeoutError as ex:
+                self.timeout(ex)
+                raise ex
+
+    def timeout(self, ex):
+        self._task.on_invocation_timeout(
+            self._invocation_id, self._args, self._kwargs, self.task_id, ex, self._options, self
+        )
 
     @property
     def state(self):
-        if self._result is None:
-            return 'WAITING'
-        else:
-            return self._result.state
+        return 'WAITING' if not self._result else self._result.state
 
     def successful(self):
-        if self._result is None:
-            return False
-        else:
-            return self._result.successful()
+        return self._result is not None and self._result.successful()
 
     def failed(self):
-        if self._result is None:
-            return False
-        else:
-            return self._result.failed()
+        return self._result is not None and self._result.failed()
 
     @property
     def id(self):
@@ -108,51 +134,6 @@ class OnCommitAsyncResult:
     @property
     def task_id(self):
         return self.id
-
-
-class AsyncResultWrapper:
-
-    def __init__(self, invocation_id, result, task, args, kwargs, options):
-        self._invocation_id = invocation_id
-        self._result = result
-        self._task = task
-        self._args = args
-        self._kwargs = kwargs
-        self._options = options
-
-    def set_result(self, result):
-        self._result = result
-
-    def then(self, *args, **kwargs):
-        return self._result.then(*args, **kwargs)
-
-    def get(self, *args, **kwargs):
-        try:
-            return self._result.get(*args, **kwargs)
-        except TimeoutError as ex:
-            self.timeout(ex)
-            raise ex
-
-    def timeout(self, ex):
-        self._task.on_invocation_timeout(self._invocation_id, self._args, self._kwargs, self.task_id, ex, self._options)
-
-    @property
-    def state(self):
-        return self._result.state
-
-    def successful(self):
-        return self._result.successful()
-
-    def failed(self):
-        return self._result.failed()
-
-    @property
-    def task_id(self):
-        return self._result.task_id
-
-    @property
-    def id(self):
-        return self._result.id
 
 
 class DjangoTask(Task):
@@ -168,6 +149,8 @@ class DjangoTask(Task):
     _stackprotected = True
 
     ignore_task_after_success_timedelta = None
+
+    result_wrapper_class = ResultWrapper
 
     def __new__(cls, *args, **kwargs):
         queue = getattr(cls, 'queue', None)
@@ -186,17 +169,18 @@ class DjangoTask(Task):
     def stale_time_limit(self):
         return settings.DEFAULT_TASK_STALE_TIME_LIMIT
 
-    def on_invocation_apply(self, invocation_id, args, kwargs, options):
+    def on_invocation_apply(self, invocation_id, args, kwargs, options, result):
         """
         Method is called when task was applied with the requester.
         :param invocation_id: UUID of the requester invocation
         :param args: input task args
         :param kwargs: input task kwargs
         :param options: input task options
+        :param result: result which will be finally returned
         """
-        pass
+        result.on_apply()
 
-    def on_invocation_trigger(self, invocation_id, args, kwargs, task_id, options):
+    def on_invocation_trigger(self, invocation_id, args, kwargs, task_id, options, result):
         """
         Task has been triggered and placed in the queue.
         :param invocation_id: UUID of the requester invocation
@@ -204,10 +188,11 @@ class DjangoTask(Task):
         :param kwargs: input task kwargs
         :param task_id: UUID of the celery task
         :param options: input task options
+        :param result: result which will be finally returned
         """
-        pass
+        result.on_trigger()
 
-    def on_invocation_unique(self, invocation_id, args, kwargs, task_id, options):
+    def on_invocation_unique(self, invocation_id, args, kwargs, task_id, options, result):
         """
         Task has been triggered but the same task is already active.
         Therefore only pointer to the active task is returned.
@@ -216,10 +201,11 @@ class DjangoTask(Task):
         :param kwargs: input task kwargs
         :param task_id: UUID of the celery task
         :param options: input task options
+        :param result: result which will be finally returned
         """
-        pass
+        result.on_unique()
 
-    def on_invocation_ignored(self, invocation_id, args, kwargs, task_id, options):
+    def on_invocation_ignored(self, invocation_id, args, kwargs, task_id, options, result):
         """
         Task has been triggered but the task has set ignore_task_after_success_timedelta
         and task was sucessfully completed in this timeout.
@@ -229,10 +215,11 @@ class DjangoTask(Task):
         :param kwargs: input task kwargs
         :param task_id: UUID of the celery task
         :param options: input task options
+        :param result: result which will be finally returned
         """
-        pass
+        result.on_ignored()
 
-    def on_invocation_timeout(self, invocation_id, args, kwargs, task_id, ex, options):
+    def on_invocation_timeout(self, invocation_id, args, kwargs, task_id, ex, options, result):
         """
         Task has been joined to another unique async result.
         :param invocation_id: UUID of the requester invocation
@@ -241,8 +228,9 @@ class DjangoTask(Task):
         :param task_id: UUID of the celery task
         :param ex: celery TimeoutError
         :param options: input task options
+        :param result: result which will be finally returned
         """
-        pass
+        result.on_timeout()
 
     def on_task_start(self, task_id, args, kwargs):
         """
@@ -334,6 +322,12 @@ class DjangoTask(Task):
             if self.ignore_task_after_success_timedelta else None
         )
 
+    def is_processing(self, args=None, kwargs=None):
+        unique_key = self._get_unique_key(args, kwargs)
+        if unique_key is None:
+            raise CeleryError('Process check can be performed for only unique tasks')
+        return cache.get(unique_key) is not None
+
     def _ignore_task_after_success(self, key):
         return key and cache.get(key)
 
@@ -423,31 +417,17 @@ class DjangoTask(Task):
         else:
             return None
 
-    def _apply_and_get_wrapped_result(self, args, kwargs, invocation_id, is_async=False, **options):
+    def _apply_and_get_result(self, args, kwargs, invocation_id, is_async=False, **options):
         if is_async:
-            return AsyncResultWrapper(
-                invocation_id,
-                self._call_super_apply_async(
-                    args=args, kwargs=kwargs, is_async=is_async, invocation_id=invocation_id, **options
-                ),
-                self,
-                args,
-                kwargs,
-                options
+            return self._call_super_apply_async(
+                args=args, kwargs=kwargs, is_async=is_async, invocation_id=invocation_id, **options
             )
         else:
-            return AsyncResultWrapper(
-                invocation_id,
-                super().apply(
-                    args=args, kwargs=kwargs, is_async=is_async, invocation_id=invocation_id, **options
-                ),
-                self,
-                args,
-                kwargs,
-                options
+            return super().apply(
+                args=args, kwargs=kwargs, is_async=is_async, invocation_id=invocation_id, **options
             )
 
-    def _trigger(self, args, kwargs, invocation_id, task_id=None, eta=None, countdown=None, expires=None,
+    def _trigger(self, result, args, kwargs, invocation_id, task_id=None, eta=None, countdown=None, expires=None,
                  time_limit=None, soft_time_limit=None, stale_time_limit=None, is_async=True, **options):
 
         app = self._get_app()
@@ -477,26 +457,21 @@ class DjangoTask(Task):
         ignore_task_after_success_key = self._get_ignore_task_after_success_key(args, kwargs)
 
         if self._ignore_task_after_success(ignore_task_after_success_key):
-            self.on_invocation_ignored(invocation_id, args, kwargs, task_id, options)
-            return IgnoredResult()
-
-        unique_key = self._get_unique_key(args, kwargs)
-        unique_task_id = self._get_unique_task_id(unique_key, task_id, stale_time_limit)
-
-        if is_async and unique_task_id != task_id:
-            options['task_id'] = unique_task_id
-            self.on_invocation_unique(invocation_id, args, kwargs, unique_task_id, options)
-            return AsyncResultWrapper(
-                invocation_id,
-                AsyncResult(unique_task_id, app=app),
-                self,
-                args,
-                kwargs,
-                options
-            )
+            result.set_options(options)
+            result.set_result(IgnoredResult())
+            self.on_invocation_ignored(invocation_id, args, kwargs, task_id, options, result)
         else:
-            self.on_invocation_trigger(invocation_id, args, kwargs, task_id, options)
-            return self._apply_and_get_wrapped_result(args, kwargs, **options)
+            unique_key = self._get_unique_key(args, kwargs)
+            unique_task_id = self._get_unique_task_id(unique_key, task_id, stale_time_limit)
+            if is_async and unique_task_id != task_id:
+                options['task_id'] = unique_task_id
+                result.set_options(options)
+                self.on_invocation_unique(invocation_id, args, kwargs, unique_task_id, options, result)
+                result.set_result(AsyncResult(unique_task_id, app=app))
+            else:
+                result.set_options(options)
+                self.on_invocation_trigger(invocation_id, args, kwargs, task_id, options, result)
+                result.set_result(self._apply_and_get_result(args, kwargs, **options))
 
     def _first_apply(self, args=None, kwargs=None, invocation_id=None, is_async=True, is_on_commit=False, using=None,
                      **options):
@@ -514,19 +489,18 @@ class DjangoTask(Task):
             is_on_commit=is_on_commit,
             using=using,
         ))
-        self.on_invocation_apply(invocation_id, args, kwargs, options)
+        result = self.result_wrapper_class(invocation_id, self, args, kwargs, options)
+        self.on_invocation_apply(invocation_id, args, kwargs, options, result)
 
         if is_on_commit:
-            on_commit_result = OnCommitAsyncResult()
             self_inst = self
 
             def _apply_on_commit():
-                result = self_inst._trigger(args=args, kwargs=kwargs, **options)
-                on_commit_result.set_result(result)
+                self_inst._trigger(result, args=args, kwargs=kwargs, **options)
             transaction.on_commit(_apply_on_commit, using=using)
-            return on_commit_result
         else:
-            return self._trigger(args=args, kwargs=kwargs, **options)
+            self._trigger(result, args=args, kwargs=kwargs, **options)
+        return result
 
     def apply_async_on_commit(self, args=None, kwargs=None, using=None, **options):
         return self._first_apply(args=args, kwargs=kwargs, is_async=True, is_on_commit=True, using=using, **options)
@@ -569,7 +543,7 @@ class DjangoTask(Task):
 
     def retry(self, args=None, kwargs=None, exc=None, throw=True,
               eta=None, countdown=None, max_retries=None, default_retry_delays=None, **options):
-
+        max_retries = max_retries or self.max_retries
         if default_retry_delays or (eta is None and countdown is None and self.default_retry_delays):
             default_retry_delays = self.default_retry_delays if default_retry_delays is None else default_retry_delays
             max_retries = len(default_retry_delays)
@@ -581,7 +555,9 @@ class DjangoTask(Task):
         if not eta:
             eta = now() + timedelta(seconds=countdown)
 
-        self.on_task_retry(self.request.id, args, kwargs, exc, eta)
+        if max_retries is None or self.request.retries < max_retries:
+            # In the opposite way task will be failed
+            self.on_task_retry(self.request.id, args, kwargs, exc, eta)
 
         return super().retry(
             args=args, kwargs=kwargs, exc=exc, throw=throw,
@@ -641,7 +617,6 @@ def auto_convert_commands_to_tasks():
         def generate_command_task(command_name, task_name):
             shared_task_kwargs = {
                 **dict(
-                    base=import_string(settings.AUTO_GENERATE_TASKS_BASE),
                     bind=True,
                     name=task_name,
                     ignore_result=True,

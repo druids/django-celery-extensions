@@ -49,7 +49,6 @@ The task will be retried three times. First attempt will be after 60 second, the
 
 Sometimes it is necessary for a task with the same input to run only once. For this purpose you can use unique configuration::
 
-
     @celery_app.task(
         base=DjangoTask,
         bind=True,
@@ -62,6 +61,9 @@ Sometimes it is necessary for a task with the same input to run only once. For t
 
 Task will be now run only once if you fill apply it two times at the same time. Attribute ``stale_time_limit`` defines maximum nuber of seconds how long the task lock will be applied.
 
+For unique tasks you can use ``is_processing`` method to check if task is running right now::
+
+    notify_user.is_processing(args=(user_pk,))
 
 Sometimes it is good convert ``Django`` commands to celery task. For example when you want to use celery beater instead of cron. For this purpose you can use ``DJANGO_CELERY_EXTENSIONS_AUTO_GENERATE_TASKS_DJANGO_COMMANDS`` setting to define which commands you want to convert into tasks::
 
@@ -96,7 +98,7 @@ Now ``notify_user`` task will be ignored for 5 hours after the last successful c
     # wait 5 hours
     notify_user.delay(5).state  # result will be SUCCESS
 
-If task ends in failure state it can be run again and will not be ignored. 
+If task ends in failure state it can be run again and will not be ignored.
 
 
 Beater
