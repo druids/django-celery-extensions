@@ -536,9 +536,8 @@ class DjangoTask(Task):
         """
         task_id = task_id or self.request.id or uuid()
         if settings.AUTO_SQS_MESSAGE_GROUP_ID:
-            options['properties'] = options.get('properties', {})
-            if 'MessageGroupId' not in options['properties']:
-                options['properties']['MessageGroupId'] = task_id
+            if 'MessageGroupId' not in options:
+                options['MessageGroupId'] = task_id
         return super().apply_async(args=args, kwargs=kwargs, task_id=task_id, **options)
 
     def apply_async(self, args=None, kwargs=None, **options):
