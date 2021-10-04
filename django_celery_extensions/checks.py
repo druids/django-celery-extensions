@@ -20,4 +20,4 @@ def check_celery_tasks(app_configs, **kwargs):
                 if error:
                     errors.append(error)
 
-        return errors
+    return errors
