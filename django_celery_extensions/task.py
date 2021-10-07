@@ -127,7 +127,7 @@ class AsyncResultWrapper:
 
     def get(self, *args, **kwargs):
         try:
-            return self._result.get()
+            return self._result.get(*args, **kwargs)
         except TimeoutError as ex:
             self.timeout(ex)
             raise ex
@@ -610,7 +610,7 @@ def string_to_obj(obj_string):
 
 def get_command_task_name(command_name):
     if command_name not in get_commands():
-        raise ImproperlyConfigured('Cannot generate celery task from command "{}", command not found'.format(name))
+        raise ImproperlyConfigured(f'Cannot generate celery task from command "{command_name}", command not found')
     app_name = get_commands()[command_name]
     return 'command.{}.{}'.format(app_name, command_name)
 
@@ -627,6 +627,7 @@ def get_django_command_task(command_name):
 def auto_convert_commands_to_tasks():
     for name in settings.AUTO_GENERATE_TASKS_DJANGO_COMMANDS:
         task_name = get_command_task_name(name)
+
         def generate_command_task(command_name, task_name):
             shared_task_kwargs = {
                 **dict(
