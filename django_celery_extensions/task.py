@@ -25,6 +25,7 @@ try:
 except ImportError:
     raise ImproperlyConfigured('Missing celery library, please install it')
 
+from .celery import CeleryQueueEnum
 from .config import settings
 
 
@@ -167,6 +168,15 @@ class DjangoTask(Task):
     _stackprotected = True
 
     ignore_task_after_success_timedelta = None
+
+    def __new__(cls, *args, **kwargs):
+        queue = getattr(cls, 'queue', None)
+        if isinstance(queue, CeleryQueueEnum):
+            cls.queue = queue.queue_name
+            for k, v in queue.default_task_kwargs.items():
+                if getattr(cls, k, None) is None:
+                    setattr(cls, k, v)
+        return super().__new__(cls, *args, **kwargs)
 
     @property
     def max_queue_waiting_time(self):

@@ -3,11 +3,14 @@ from enum import Enum
 from celery import Celery as BaseCelery
 
 
-class CeleryQueueEnum(Enum):
+class CeleryQueueEnum(str, Enum):
 
-    def __init__(self, queue_name, default_task_kwargs=None):
-        self.queue_name = queue_name
-        self.default_task_kwargs = default_task_kwargs or {}
+    def __new__(cls, value, default_task_kwargs):
+        obj = str.__new__(cls, value)
+        obj._value_ = value
+        obj.queue_name = value
+        obj.default_task_kwargs = default_task_kwargs or {}
+        return obj
 
     def __str__(self):
         return self.queue_name
@@ -16,13 +19,3 @@ class CeleryQueueEnum(Enum):
 class Celery(BaseCelery):
 
     task_cls = 'django_celery_extensions.task:DjangoTask'
-
-    def task(self, *args, **kwargs):
-        queue = kwargs.pop('queue', None)
-        if isinstance(queue, CeleryQueueEnum):
-            kwargs['queue'] = queue.queue_name
-            kwargs = {
-                **queue.default_task_kwargs,
-                **kwargs,
-            }
-        return super().task(*args, **kwargs)
