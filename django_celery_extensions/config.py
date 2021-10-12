@@ -18,6 +18,7 @@ DEFAULTS = {
     'AUTO_GENERATE_TASKS_BASE': 'django_celery_extensions.task.DjangoTask',
     'AUTO_GENERATE_TASKS_DEFAULT_CELERY_KWARGS': None,
     'AUTO_SQS_MESSAGE_GROUP_ID': False,
+    'CELERY_TASK_CHECKER': None,
 }
 
 
