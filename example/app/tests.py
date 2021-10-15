@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from celery.exceptions import CeleryError, TimeoutError
 
+from django.core.cache import caches
 from django.contrib.auth.models import User
 from django.test import override_settings
 from django.utils.timezone import now
@@ -21,8 +22,9 @@ from app.tasks import (
     task_with_fast_queue
 )
 
+from django_celery_extensions.config import settings
 from django_celery_extensions.task import (
-    get_django_command_task, default_unique_key_generator, NotTriggeredCeleryError, AsyncResultWrapper
+    get_django_command_task, default_unique_key_generator, NotTriggeredCeleryError
 )
 
 
@@ -107,7 +109,7 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
     def test_task_on_invocation_apply_signal_method_was_called_with_right_input(self):
         with patch.object(sum_task, 'on_invocation_apply') as mocked_method:
             with capture_on_commit_callbacks(execute=True):
-                sum_task.apply_async_on_commit(args=(8, 19), invocation_id='test')
+                result = sum_task.apply_async_on_commit(args=(8, 19), invocation_id='test')
                 mocked_method.assert_called_with(
                     'test',
                     (8, 19),
@@ -119,10 +121,11 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
                         'apply_time': now(),
                         'is_on_commit': True,
                         'using': None,
-                    }
+                    },
+                    result
                 )
 
-                sum_task.apply_async(args=(8, 19), invocation_id='test2', task_id='test2')
+                result = sum_task.apply_async(args=(8, 19), invocation_id='test2', task_id='test2')
                 mocked_method.assert_called_with(
                     'test2',
                     (8, 19),
@@ -135,40 +138,44 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
                         'apply_time': now(),
                         'is_on_commit': False,
                         'using': None,
-                    }
+                    },
+                    result
                 )
 
     @freeze_time(now())
     def test_task_on_invocation_trigger_signal_method_was_called_with_right_input(self):
         with patch.object(sum_task, 'on_invocation_trigger') as mocked_method:
             with capture_on_commit_callbacks(execute=True):
-                sum_task.apply_async_on_commit(args=(8, 19), invocation_id='test invocation', task_id='test task')
+                result = sum_task.apply_async_on_commit(
+                    args=(8, 19), invocation_id='test invocation', task_id='test task'
+                )
                 mocked_method.assert_not_called()
 
             mocked_method.assert_called_with(
-                    'test invocation',
-                    (8, 19),
-                    None,
-                    'test task',
-                    {
-                        'queue': 'default',
-                        'apply_time': now(),
-                        'is_on_commit': True,
-                        'is_async': True,
-                        'invocation_id': 'test invocation',
-                        'task_id': 'test task',
-                        'trigger_time': now(),
-                        'time_limit': 300,
-                        'soft_time_limit': 120,
-                        'eta': now(),
-                        'countdown': None,
-                        'expires': None,
-                        'stale_time_limit': None,
-                        'using': None,
-                    }
-                )
+                'test invocation',
+                (8, 19),
+                None,
+                'test task',
+                {
+                    'queue': 'default',
+                    'apply_time': now(),
+                    'is_on_commit': True,
+                    'is_async': True,
+                    'invocation_id': 'test invocation',
+                    'task_id': 'test task',
+                    'trigger_time': now(),
+                    'time_limit': 300,
+                    'soft_time_limit': 120,
+                    'eta': now(),
+                    'countdown': None,
+                    'expires': None,
+                    'stale_time_limit': None,
+                    'using': None,
+                },
+                result
+            )
 
-            sum_task.apply(kwargs={'a': 8, 'b': 19}, invocation_id='test invocation', task_id='test task')
+            result = sum_task.apply(kwargs={'a': 8, 'b': 19}, invocation_id='test invocation', task_id='test task')
             mocked_method.assert_called_with(
                 'test invocation',
                 None,
@@ -189,11 +196,12 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
                     'expires': None,
                     'stale_time_limit': None,
                     'using': None,
-                }
+                },
+                result
             )
 
             with override_settings(DJANGO_CELERY_EXTENSIONS_DEFAULT_TASK_MAX_QUEUE_WAITING_TIME=1):
-                sum_task.apply(kwargs={'a': 8, 'b': 19}, invocation_id='test invocation', task_id='test task')
+                result = sum_task.apply(kwargs={'a': 8, 'b': 19}, invocation_id='test invocation', task_id='test task')
                 mocked_method.assert_called_with(
                     'test invocation',
                     None,
@@ -214,16 +222,17 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
                         'expires': now() + timedelta(seconds=1),
                         'stale_time_limit': 301,
                         'using': None,
-                    }
+                    },
+                    result
                 )
 
     @freeze_time(now())
     @override_settings(CELERY_ALWAYS_EAGER=False, DJANGO_CELERY_EXTENSIONS_DEFAULT_TASK_MAX_QUEUE_WAITING_TIME=1)
     def test_task_on_invocation_unique_signal_method_was_called_with_right_input(self):
         with patch.object(unique_task, 'on_invocation_unique') as mocked_method:
-            with patch.object(unique_task, '_apply_and_get_wrapped_result'):
+            with patch.object(unique_task, '_apply_and_get_result'):
                 unique_task.apply_async(invocation_id='test invocation', task_id='test task')
-                unique_task.apply_async(invocation_id='test invocation2')
+                result = unique_task.apply_async(invocation_id='test invocation2')
                 mocked_method.assert_called_with(
                     'test invocation2',
                     None,
@@ -244,7 +253,8 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
                         'expires': now() + timedelta(seconds=1),
                         'stale_time_limit': 301,
                         'using': None,
-                    }
+                    },
+                    result
                 )
 
     @freeze_time(now())
@@ -259,10 +269,8 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
                 raise exc
 
         with patch.object(unique_task, 'on_invocation_timeout') as mocked_method:
-            with patch.object(unique_task, '_apply_and_get_wrapped_result') as apply_method:
-                apply_method.return_value = AsyncResultWrapper(
-                    'test invocation', TimeoutResult(), unique_task, None, None, {'test': 'options'}
-                )
+            with patch.object(unique_task, '_apply_and_get_result') as apply_method:
+                apply_method.return_value = TimeoutResult()
 
                 result = unique_task.apply_async(invocation_id='test invocation', task_id='test task')
                 with assert_raises(TimeoutError):
@@ -274,7 +282,8 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
                     None,
                     'test task',
                     exc,
-                    {'test': 'options'}
+                    result._options,
+                    result
                 )
 
     def test_task_on_task_start_signal_method_was_called_with_right_input(self):
@@ -340,26 +349,19 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
     def test_task_with_fast_queue_should_have_set_time_limit_from_queue_settings(self):
         with patch.object(task_with_fast_queue, 'on_invocation_trigger') as mocked_method:
             task_with_fast_queue.apply(invocation_id='test invocation', task_id='test task')
+            mocked_method.assert_called_once()
 
-            mocked_method.assert_called_with(
-                    'test invocation',
-                    None,
-                    None,
-                    'test task',
-                    {
-                        'queue': 'fast',
-                        'apply_time': now(),
-                        'is_on_commit': False,
-                        'is_async': False,
-                        'invocation_id': 'test invocation',
-                        'task_id': 'test task',
-                        'trigger_time': now(),
-                        'time_limit': 10,
-                        'soft_time_limit': 120,
-                        'eta': now(),
-                        'countdown': None,
-                        'expires': None,
-                        'stale_time_limit': None,
-                        'using': None,
-                    }
-                )
+    @override_settings(CELERY_ALWAYS_EAGER=False, DJANGO_CELERY_EXTENSIONS_DEFAULT_TASK_STALE_TIME_LIMIT=5)
+    def test_unique_task_is_processing_should_return_right_value(self):
+        with patch.object(unique_task, '_get_unique_key') as get_unique_key_method:
+            with patch.object(unique_task, 'on_invocation_unique') as mocked_method:
+                get_unique_key_method.return_value = 'unique'
+                assert_false(unique_task.is_processing())
+                caches[settings.CACHE_NAME].set('unique', 'random')
+                assert_true(unique_task.is_processing())
+                assert_equal(unique_task.apply_async().id, 'random')
+                mocked_method.assert_called_once()
+
+    def test_only_unique_task_should_use_is_processing(self):
+        with assert_raises(CeleryError):
+            sum_task.is_processing()

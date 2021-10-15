@@ -54,7 +54,7 @@ lint: ## check style with flake8
 	flake8 django_celery_extensions example
 
 test: ## run tests quickly with the default Python
-	cd example && ./manage.py test $(test_modules)
+	cd example && ./manage.py test $(test_modules) -v 2
 
 test-all: ## run tests on every Python version with tox
 	tox
