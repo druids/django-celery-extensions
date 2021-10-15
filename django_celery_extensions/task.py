@@ -428,7 +428,8 @@ class DjangoTask(Task):
             )
 
     def _trigger(self, result, args, kwargs, invocation_id, task_id=None, eta=None, countdown=None, expires=None,
-                 time_limit=None, soft_time_limit=None, stale_time_limit=None, is_async=True, **options):
+                 time_limit=None, soft_time_limit=None, stale_time_limit=None, ignore_task_after_success=None,
+                 is_async=True, **options):
 
         app = self._get_app()
 
@@ -454,7 +455,14 @@ class DjangoTask(Task):
             stale_time_limit=stale_time_limit
         ))
 
-        ignore_task_after_success_key = self._get_ignore_task_after_success_key(args, kwargs)
+        ignore_task_after_success = (
+            ignore_task_after_success if ignore_task_after_success is not None
+            else self.ignore_task_after_success_timedelta is not None
+        )
+
+        ignore_task_after_success_key = (
+            self._get_ignore_task_after_success_key(args, kwargs) if ignore_task_after_success else None
+        )
 
         if self._ignore_task_after_success(ignore_task_after_success_key):
             result.set_options(options)

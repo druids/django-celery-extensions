@@ -335,11 +335,19 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
         assert_false(ignored_result.failed())
         assert_is_none(ignored_result.task_id)
 
+        not_ignored_result = ignored_after_success_task.apply(ignore_task_after_success=False)
+        assert_equal(not_ignored_result.state, 'SUCCESS')
+        assert_equal(not_ignored_result.get(), 'ignored_task_after_success')
+
         with freeze_time(now() + timedelta(hours=1)):
             assert_equal(ignored_after_success_task.delay().state, 'IGNORED')
 
         with freeze_time(now() + timedelta(hours=1, minutes=5)):
             assert_equal(ignored_after_success_task.delay().state, 'SUCCESS')
+
+        with freeze_time(now() + timedelta(hours=2, minutes=10)):
+            ignored_after_success_task.apply(ignore_task_after_success=False)
+            assert_equal(ignored_after_success_task.delay().state, 'IGNORED')
 
     def test_ignored_after_error_task_should_be_ignored_for_second_call(self):
         assert_equal(ignored_after_error_task.delay().state, 'FAILURE')
