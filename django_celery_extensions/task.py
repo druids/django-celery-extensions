@@ -20,6 +20,7 @@ try:
     from celery import Task, shared_task, current_app
     from celery.result import AsyncResult
     from celery.exceptions import CeleryError, TimeoutError
+    from celery.utils.time import maybe_iso8601
     from kombu.utils import uuid as task_uuid
     from kombu import serialization
 except ImportError:
@@ -566,6 +567,11 @@ class DjangoTask(Task):
         if max_retries is None or self.request.retries < max_retries:
             # In the opposite way task will be failed
             self.on_task_retry(self.request.id, args, kwargs, exc, eta)
+
+        # Fix bug in celery==5.2.*
+        request_execution_options = self.request.as_execution_options()
+        if 'expires' in request_execution_options:
+            options.setdefault('expires', maybe_iso8601(request_execution_options['expires']))
 
         return super().retry(
             args=args, kwargs=kwargs, exc=exc, throw=throw,
