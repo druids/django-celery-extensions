@@ -430,7 +430,9 @@ class DjangoTask(Task):
 
     def _trigger(self, result, args, kwargs, invocation_id, task_id=None, eta=None, countdown=None, expires=None,
                  time_limit=None, soft_time_limit=None, stale_time_limit=None, ignore_task_after_success=None,
-                 is_async=True, **options):
+                 is_async=True, headers=None, **options):
+
+        headers = {} if headers is None else headers
 
         app = self._get_app()
 
@@ -453,6 +455,12 @@ class DjangoTask(Task):
             countdown=countdown,
             expires=expires,
             is_async=is_async,
+            stale_time_limit=stale_time_limit
+        ))
+
+        headers.update(dict(
+            apply_time=options['apply_time'].isoformat(),
+            trigger_time=trigger_time.isoformat(),
             stale_time_limit=stale_time_limit
         ))
 
@@ -480,7 +488,7 @@ class DjangoTask(Task):
             else:
                 result.set_options(options)
                 self.on_invocation_trigger(invocation_id, args, kwargs, task_id, options, result)
-                result.set_result(self._apply_and_get_result(args, kwargs, **options))
+                result.set_result(self._apply_and_get_result(args, kwargs, headers=headers, **options))
 
     def _first_apply(self, args=None, kwargs=None, invocation_id=None, is_async=True, is_on_commit=False, using=None,
                      **options):
