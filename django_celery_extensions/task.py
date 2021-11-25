@@ -558,8 +558,20 @@ class DjangoTask(Task):
         options = kwargs.pop('options', {})
         self.apply_async_on_commit(args, kwargs, **options)
 
+    def _get_header_from_request(self, name):
+        return self.request.get(name) if self.request.headers else getattr(self.request, name)
+
     def retry(self, args=None, kwargs=None, exc=None, throw=True,
-              eta=None, countdown=None, max_retries=None, default_retry_delays=None, **options):
+              eta=None, countdown=None, max_retries=None, default_retry_delays=None, headers=None, **options):
+        headers = {} if headers is None else headers
+
+        trigger_time = now()
+
+        headers.update(dict(
+            apply_time=self._get_header_from_request('apply_time'),
+            trigger_time=trigger_time.isoformat(),
+            stale_time_limit=self._get_header_from_request('stale_time_limit')
+        ))
         max_retries = max_retries or self.max_retries
         if default_retry_delays or (eta is None and countdown is None and self.default_retry_delays):
             default_retry_delays = self.default_retry_delays if default_retry_delays is None else default_retry_delays
@@ -570,7 +582,7 @@ class DjangoTask(Task):
             countdown = self.default_retry_delay
 
         if not eta:
-            eta = now() + timedelta(seconds=countdown)
+            eta = trigger_time + timedelta(seconds=countdown)
 
         if max_retries is None or self.request.retries < max_retries:
             # In the opposite way task will be failed
@@ -583,7 +595,7 @@ class DjangoTask(Task):
 
         return super().retry(
             args=args, kwargs=kwargs, exc=exc, throw=throw,
-            eta=eta, max_retries=max_retries, **options
+            eta=eta, max_retries=max_retries, headers=headers, **options
         )
 
     def apply_async_and_get_result(self, args=None, kwargs=None, timeout=None, propagate=True, **options):
