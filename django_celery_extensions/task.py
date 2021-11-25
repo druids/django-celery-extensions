@@ -559,7 +559,7 @@ class DjangoTask(Task):
         self.apply_async_on_commit(args, kwargs, **options)
 
     def _get_header_from_request(self, name):
-        return self.request.headers.get(name) if self.request.headers else getattr(self.request, name)
+        return getattr(self.request, name) if hasattr(self.request, name) else self.request.headers.get(name)
 
     def retry(self, args=None, kwargs=None, exc=None, throw=True,
               eta=None, countdown=None, max_retries=None, default_retry_delays=None, headers=None, **options):
