@@ -43,5 +43,8 @@ setup(
         'celery >= 5.0.5',
         'attrdict >= 2.0.0',
     ],
+    entry_points={'console_scripts': [
+        'celeryautoreload=django_celery_extensions.bin.celeryautoreload:celery_autoreload',
+    ]},
     zip_safe=False
 )
