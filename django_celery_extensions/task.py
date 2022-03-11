@@ -418,7 +418,7 @@ class DjangoTask(Task):
         else:
             return None
 
-    def _apply_and_get_result(self, args, kwargs, invocation_id, is_async=False, **options):
+    def _apply_and_get_result(self, result, args, kwargs, invocation_id, is_async=False, **options):
         if is_async:
             return self._call_super_apply_async(
                 args=args, kwargs=kwargs, is_async=is_async, invocation_id=invocation_id, **options
@@ -488,7 +488,7 @@ class DjangoTask(Task):
             else:
                 result.set_options(options)
                 self.on_invocation_trigger(invocation_id, args, kwargs, task_id, options, result)
-                result.set_result(self._apply_and_get_result(args, kwargs, headers=headers, **options))
+                result.set_result(self._apply_and_get_result(result, args, kwargs, headers=headers, **options))
 
     def _first_apply(self, args=None, kwargs=None, invocation_id=None, is_async=True, is_on_commit=False, using=None,
                      **options):
