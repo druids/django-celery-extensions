@@ -677,3 +677,12 @@ def auto_convert_commands_to_tasks():
                 )
 
         generate_command_task(name, task_name)
+
+
+def init_celery_app():
+    if settings.CELERY_SETTINGS:
+        import_string(settings.CELERY_SETTINGS)
+
+    if settings.CELERY_AUTODISCOVER:
+        from common.celery import app
+        app.autodiscover_tasks(force=True)
