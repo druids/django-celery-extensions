@@ -153,6 +153,9 @@ class DjangoTask(Task):
 
     result_wrapper_class = ResultWrapper
 
+    max_queue_waiting_time = None
+    stale_time_limit = None
+
     def __new__(cls, *args, **kwargs):
         queue = getattr(cls, 'queue', None)
         if isinstance(queue, CeleryQueueEnum):
@@ -161,14 +164,6 @@ class DjangoTask(Task):
                 if getattr(cls, k, None) is None:
                     setattr(cls, k, v)
         return super().__new__(cls, *args, **kwargs)
-
-    @property
-    def max_queue_waiting_time(self):
-        return settings.DEFAULT_TASK_MAX_QUEUE_WAITING_TIME
-
-    @property
-    def stale_time_limit(self):
-        return settings.DEFAULT_TASK_STALE_TIME_LIMIT
 
     def on_invocation_apply(self, invocation_id, args, kwargs, options, result):
         """
@@ -372,6 +367,8 @@ class DjangoTask(Task):
             return trigger_time
 
     def _compute_expires(self, expires, time_limit, stale_time_limit, trigger_time):
+        print(expires, time_limit, stale_time_limit)
+
         expires = self.expires if expires is None else expires
         if expires is not None:
             return trigger_time + timedelta(seconds=expires) if isinstance(expires, int) else expires
@@ -397,24 +394,28 @@ class DjangoTask(Task):
             return self._get_app().conf.task_soft_time_limit
 
     def _get_stale_time_limit(self, expires, time_limit, stale_time_limit, trigger_time):
+        max_queue_waiting_time = self.max_queue_waiting_time or settings.DEFAULT_TASK_MAX_QUEUE_WAITING_TIME
+
         if stale_time_limit is not None:
             return stale_time_limit
-        elif self.stale_time_limit is not None:
-            return self.stale_time_limit
-        elif time_limit is not None and self.max_queue_waiting_time:
+        elif stale_time_limit is not None:
+            return stale_time_limit
+        elif settings.DEFAULT_TASK_STALE_TIME_LIMIT is not None:
+            return settings.DEFAULT_TASK_STALE_TIME_LIMIT
+        elif time_limit is not None and max_queue_waiting_time:
             autoretry_for = getattr(self, 'autoretry_for', None)
             if autoretry_for and self.default_retry_delays:
                 return (
-                    (time_limit + self.max_queue_waiting_time) * len(self.default_retry_delays) + 1
+                    (time_limit + max_queue_waiting_time) * (len(self.default_retry_delays) + 1)
                     + sum(self.default_retry_delays)
                 )
             elif autoretry_for:
                 return (
-                    (time_limit + self.max_queue_waiting_time + self.default_retry_delay) * self.max_retries
-                    + time_limit + self.max_queue_waiting_time
+                    (time_limit + max_queue_waiting_time + self.default_retry_delay) * self.max_retries
+                    + time_limit + max_queue_waiting_time
                 )
             else:
-                return time_limit + self.max_queue_waiting_time
+                return time_limit + max_queue_waiting_time
         else:
             return None
 
@@ -440,11 +441,14 @@ class DjangoTask(Task):
 
         time_limit = self._get_time_limit(time_limit)
         trigger_time = now()
+
+        print(trigger_time)
         eta = self._compute_eta(eta, countdown, trigger_time)
         countdown = None
         stale_time_limit = self._get_stale_time_limit(expires, time_limit, stale_time_limit, trigger_time)
+        print('stale time limit', stale_time_limit)
         expires = self._compute_expires(expires, time_limit, stale_time_limit, trigger_time)
-
+        print(expires)
         options.update(dict(
             invocation_id=invocation_id,
             task_id=task_id,
