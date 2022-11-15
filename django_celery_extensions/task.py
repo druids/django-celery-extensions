@@ -367,8 +367,6 @@ class DjangoTask(Task):
             return trigger_time
 
     def _compute_expires(self, expires, time_limit, stale_time_limit, trigger_time):
-        print(expires, time_limit, stale_time_limit)
-
         expires = self.expires if expires is None else expires
         if expires is not None:
             return trigger_time + timedelta(seconds=expires) if isinstance(expires, int) else expires
@@ -442,13 +440,10 @@ class DjangoTask(Task):
         time_limit = self._get_time_limit(time_limit)
         trigger_time = now()
 
-        print(trigger_time)
         eta = self._compute_eta(eta, countdown, trigger_time)
         countdown = None
         stale_time_limit = self._get_stale_time_limit(expires, time_limit, stale_time_limit, trigger_time)
-        print('stale time limit', stale_time_limit)
         expires = self._compute_expires(expires, time_limit, stale_time_limit, trigger_time)
-        print(expires)
         options.update(dict(
             invocation_id=invocation_id,
             task_id=task_id,
