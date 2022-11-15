@@ -41,7 +41,8 @@ def unique_task(self):
 @celery_app.task(
     bind=True,
     name='ignored_after_success_task',
-    ignore_task_after_success_timedelta=timedelta(hours=1, minutes=5))
+    ignore_task_after_success=True,
+    ignore_task_timedelta=timedelta(hours=1, minutes=5))
 def ignored_after_success_task(self):
     return 'ignored_task_after_success'
 
@@ -49,7 +50,8 @@ def ignored_after_success_task(self):
 @celery_app.task(
     bind=True,
     name='ignored_after_error_task',
-    ignore_task_after_success_timedelta=timedelta(hours=1, minutes=5))
+    ignore_task_after_success=True,
+    ignore_task_timedelta=timedelta(hours=1, minutes=5))
 def ignored_after_error_task(self):
     raise RuntimeError('error')
 
@@ -58,3 +60,12 @@ def ignored_after_error_task(self):
     queue=CeleryQueue.FAST)
 def task_with_fast_queue():
     return 'result'
+
+
+@celery_app.task(
+    bind=True,
+    name='manual_ignore_task',
+    ignore_task_timedelta=timedelta(hours=1, minutes=5))
+def manual_ignore_task(self, ignore_task):
+    if ignore_task:
+        self.set_ignore_task()
