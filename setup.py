@@ -14,7 +14,7 @@ setup(
     name='django-celery-extensions',
     long_description=readme,
     long_description_content_type='text/markdown',
-    version='0.0.33',
+    version='0.0.34',
     description="Django celery extensions library.",
     keywords='django, celery',
     author='Lubos Matl',
