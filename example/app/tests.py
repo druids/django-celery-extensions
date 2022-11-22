@@ -12,14 +12,14 @@ from django.utils.timezone import now
 from germanium.test_cases.default import GermaniumTestCase
 from germanium.tools import (
     assert_equal, assert_not_raises, assert_raises, assert_is_none, assert_true, assert_is_not_none,
-    capture_on_commit_callbacks, assert_false
+    capture_commit_callbacks, assert_false
 )
 
 from freezegun import freeze_time
 
 from app.tasks import (
     error_task, retry_task, sum_task, unique_task, ignored_after_success_task, ignored_after_error_task,
-    task_with_fast_queue
+    task_with_fast_queue, manual_ignore_task
 )
 
 from django_celery_extensions.config import settings
@@ -48,7 +48,7 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
         assert_equal(unique_task.apply_async_and_get_result(), 'unique')
 
     def test_apply_async_on_commit_should_run_task_and_return_on_commit_result(self):
-        with capture_on_commit_callbacks(execute=True):
+        with capture_commit_callbacks(execute_on_commit=True):
             result = sum_task.apply_async_on_commit(args=(8, 19))
             assert_equal(result.state, 'WAITING')
             with assert_raises(NotTriggeredCeleryError):
@@ -108,7 +108,7 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
     @freeze_time(now())
     def test_task_on_invocation_apply_signal_method_was_called_with_right_input(self):
         with patch.object(sum_task, 'on_invocation_apply') as mocked_method:
-            with capture_on_commit_callbacks(execute=True):
+            with capture_commit_callbacks(execute_on_commit=True):
                 result = sum_task.apply_async_on_commit(args=(8, 19), invocation_id='test')
                 mocked_method.assert_called_with(
                     'test',
@@ -145,7 +145,7 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
     @freeze_time(now())
     def test_task_on_invocation_trigger_signal_method_was_called_with_right_input(self):
         with patch.object(sum_task, 'on_invocation_trigger') as mocked_method:
-            with capture_on_commit_callbacks(execute=True):
+            with capture_commit_callbacks(execute_on_commit=True):
                 result = sum_task.apply_async_on_commit(
                     args=(8, 19), invocation_id='test invocation', task_id='test task'
                 )
@@ -373,3 +373,10 @@ class DjangoCeleryExtensionsTestCase(GermaniumTestCase):
     def test_only_unique_task_should_use_is_processing(self):
         with assert_raises(CeleryError):
             sum_task.is_processing()
+
+    def test_task_should_be_ignored_manually(self):
+        assert_equal(manual_ignore_task.delay(ignore_task=False).state, 'SUCCESS')
+        assert_equal(manual_ignore_task.delay(ignore_task=True).state, 'SUCCESS')
+        assert_equal(manual_ignore_task.delay(ignore_task=True).state, 'IGNORED')
+        with freeze_time(now() + timedelta(hours=1, minutes=5)):
+            assert_equal(manual_ignore_task.delay(ignore_task=True).state, 'SUCCESS')

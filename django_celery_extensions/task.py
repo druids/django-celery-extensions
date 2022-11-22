@@ -33,9 +33,6 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 
-cache = caches[settings.CACHE_NAME]
-
-
 def default_unique_key_generator(task, prefix, task_args, task_kwargs):
     task_args = task_args or ()
     task_kwargs = task_kwargs or {}
@@ -149,7 +146,8 @@ class DjangoTask(Task):
     unique_key_generator = default_unique_key_generator
     _stackprotected = True
 
-    ignore_task_after_success_timedelta = None
+    ignore_task_after_success = False
+    ignore_task_timedelta = None
 
     result_wrapper_class = ResultWrapper
 
@@ -203,7 +201,7 @@ class DjangoTask(Task):
 
     def on_invocation_ignored(self, invocation_id, args, kwargs, task_id, options, result):
         """
-        Task has been triggered but the task has set ignore_task_after_success_timedelta
+        Task has been triggered but the task has set ignore_task_timedelta
         and task was sucessfully completed in this timeout.
         Therefore no new task is invoked.
         :param invocation_id: UUID of the requester invocation
@@ -278,7 +276,11 @@ class DjangoTask(Task):
         super().on_success(retval, task_id, args, kwargs)
         self.on_task_success(task_id, args, kwargs, retval)
         self._clear_unique_key(args, kwargs)
-        self._set_ignore_task_after_success(args, kwargs)
+        if self.ignore_task_after_success:
+            assert self.ignore_task_timedelta is not None, (
+                'ignore_task_timedelta must be set for ignore_task_after_success'
+            )
+            self._set_ignore_task_after_success(args, kwargs)
 
     def __call__(self, *args, **kwargs):
         """
@@ -310,47 +312,46 @@ class DjangoTask(Task):
             settings.UNIQUE_TASK_KEY_PREFIX, task_args, task_kwargs
         ) if self.unique else None
 
-    def _get_ignore_task_after_success_key(self, task_args, task_kwargs):
-        return (
-            self.unique_key_generator(
-                settings.IGNORE_TASK_AFTER_SUCCESS_KEY_PREFIX, task_args, task_kwargs
-            )
-            if self.ignore_task_after_success_timedelta else None
+    def _get_ignore_task_key(self, task_args, task_kwargs):
+        return self.unique_key_generator(
+            settings.IGNORE_TASK_AFTER_SUCCESS_KEY_PREFIX, task_args, task_kwargs
         )
 
     def is_processing(self, args=None, kwargs=None):
         unique_key = self._get_unique_key(args, kwargs)
         if unique_key is None:
             raise CeleryError('Process check can be performed for only unique tasks')
-        return cache.get(unique_key) is not None
+        return caches[settings.CACHE_NAME].get(unique_key) is not None
 
     def _ignore_task_after_success(self, key):
-        return key and cache.get(key)
+        return key and caches[settings.CACHE_NAME].get(key)
 
-    def _set_ignore_task_after_success(self, task_args, task_kwargs):
-        ignore_task_after_success_key = self._get_ignore_task_after_success_key(task_args, task_kwargs)
-        if ignore_task_after_success_key:
-            current_time = localtime()
-            cache.add(
-                ignore_task_after_success_key,
-                True,
-                (current_time + self.ignore_task_after_success_timedelta - current_time).total_seconds()
-            )
+    def _set_ignore_task_after_success(self, task_args, task_kwargs, ignore_task_timedelta=None):
+        ignore_task_timedelta = self.ignore_task_timedelta if ignore_task_timedelta is None else ignore_task_timedelta
+        if ignore_task_timedelta:
+            ignore_task_key = self._get_ignore_task_key(task_args, task_kwargs)
+            if ignore_task_key:
+                current_time = localtime()
+                caches[settings.CACHE_NAME].add(
+                    ignore_task_key,
+                    True,
+                    (current_time + ignore_task_timedelta - current_time).total_seconds()
+                )
 
     def _clear_unique_key(self, task_args, task_kwargs):
         unique_key = self._get_unique_key(task_args, task_kwargs)
         if unique_key:
-            cache.delete(unique_key)
+            caches[settings.CACHE_NAME].delete(unique_key)
 
     def _get_unique_task_id(self, unique_key, task_id, stale_time_limit):
         if unique_key and not stale_time_limit:
             raise CeleryError('For unique tasks is require set task stale_time_limit')
 
         if unique_key and not self._get_app().conf.task_always_eager:
-            if cache.add(unique_key, task_id, stale_time_limit):
+            if caches[settings.CACHE_NAME].add(unique_key, task_id, stale_time_limit):
                 return task_id
             else:
-                unique_task_id = cache.get(unique_key)
+                unique_task_id = caches[settings.CACHE_NAME].get(unique_key)
                 return (
                     unique_task_id if unique_task_id
                     else self._get_unique_task_id(unique_key, task_id, stale_time_limit)
@@ -465,11 +466,11 @@ class DjangoTask(Task):
 
         ignore_task_after_success = (
             ignore_task_after_success if ignore_task_after_success is not None
-            else self.ignore_task_after_success_timedelta is not None
+            else self.ignore_task_timedelta is not None
         )
 
         ignore_task_after_success_key = (
-            self._get_ignore_task_after_success_key(args, kwargs) if ignore_task_after_success else None
+            self._get_ignore_task_key(args, kwargs) if ignore_task_after_success else None
         )
 
         if self._ignore_task_after_success(ignore_task_after_success_key):
@@ -618,6 +619,12 @@ class DjangoTask(Task):
     def get_command_kwargs(self):
         return {}
 
+    def set_ignore_task(self, ignore_task_timedelta=None):
+        assert ignore_task_timedelta is not None or self.ignore_task_timedelta is not None, (
+            'ignore_task_timedelta must be set'
+        )
+        self._set_ignore_task_after_success(self.request.args, self.request.kwargs, ignore_task_timedelta)
+
 
 def obj_to_string(obj):
     return base64.encodebytes(pickle.dumps(obj)).decode('utf8')
@@ -644,6 +651,9 @@ def get_django_command_task(command_name):
 
 
 def auto_convert_commands_to_tasks():
+    from django.core.management.base import BaseCommand
+    BaseCommand.stealth_options = tuple(BaseCommand.stealth_options) + ('celery_task',)
+
     for name in settings.AUTO_GENERATE_TASKS_DJANGO_COMMANDS:
         task_name = get_command_task_name(name)
 
@@ -671,6 +681,7 @@ def auto_convert_commands_to_tasks():
                 call_command(
                     command_name,
                     settings=os.environ.get('DJANGO_SETTINGS_MODULE'),
+                    celery_task=self,
                     *command_args,
                     **self.get_command_kwargs()
                 )

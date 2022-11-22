@@ -1,11 +1,11 @@
-from django.core.checks import register, Tags
+from django.core.checks import register
 
 import import_string
 
 from .config import settings
 
 
-@register(Tags.async_support)
+@register()
 def check_celery_tasks(app_configs, **kwargs):
     from celery import current_app
 
