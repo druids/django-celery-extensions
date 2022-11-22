@@ -397,8 +397,8 @@ class DjangoTask(Task):
 
         if stale_time_limit is not None:
             return stale_time_limit
-        elif stale_time_limit is not None:
-            return stale_time_limit
+        elif self.stale_time_limit is not None:
+            return self.stale_time_limit
         elif settings.DEFAULT_TASK_STALE_TIME_LIMIT is not None:
             return settings.DEFAULT_TASK_STALE_TIME_LIMIT
         elif time_limit is not None and max_queue_waiting_time:
