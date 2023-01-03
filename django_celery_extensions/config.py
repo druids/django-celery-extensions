@@ -1,7 +1,5 @@
 from django.conf import settings as django_settings
 
-from attrdict import AttrDict
-
 from celery.beat import DEFAULT_MAX_INTERVAL
 
 
@@ -29,12 +27,7 @@ class Settings:
         if attr not in DEFAULTS:
             raise AttributeError('Invalid setting: "{}"'.format(attr))
 
-        value = getattr(django_settings, 'DJANGO_CELERY_EXTENSIONS_{}'.format(attr), DEFAULTS[attr])
-
-        if isinstance(value, dict):
-            value = AttrDict(value)
-
-        return value
+        return getattr(django_settings, 'DJANGO_CELERY_EXTENSIONS_{}'.format(attr), DEFAULTS[attr])
 
 
 settings = Settings()

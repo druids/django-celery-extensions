@@ -197,3 +197,5 @@ STATIC_ROOT = ''
 STATICFILES_DIRS = (
     STATICFILES_ROOT,
 )
+
+DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
