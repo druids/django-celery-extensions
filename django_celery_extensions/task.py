@@ -314,7 +314,7 @@ class DjangoTask(Task):
 
     def _get_ignore_task_key(self, task_args, task_kwargs):
         return self.unique_key_generator(
-            settings.IGNORE_TASK_AFTER_SUCCESS_KEY_PREFIX, task_args, task_kwargs
+            settings.IGNORE_TASK_KEY_PREFIX, task_args, task_kwargs
         )
 
     def is_processing(self, args=None, kwargs=None):
