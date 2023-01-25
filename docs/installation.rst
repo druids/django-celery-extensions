@@ -4,6 +4,20 @@
 Installation
 ============
 
+Library purpose
+---------------
+
+Library extends celery framework with these improvements:
+* Automatic Django commands conversion to the celery tasks
+* Improve celery signals with on apply, trigger, unique or timeout events
+* Add possibility to create the unique celery task
+* Add possibility to ignore task invocation for the defined timeout
+* Fix some celery bugs with the expiration
+* Better AWS SQS support
+* Apply a task and wait for the result for the timeout
+* Celery beater implementation which will ensure that only one beater can be active if more beater are running at the same time
+* Define celery queues in the enums
+* Use Django checks to validate celery tasks settings
 
 Stable release
 --------------
@@ -59,16 +73,16 @@ Once installed, add the library to ``INSTALLED_APPS`` in your Django project set
     INSTALLED_APPS = [
         ...
         'django_celery_extensions',
+        ...
     ]
 
 For your celery configuration use ``django_celery_extensions.celery.Celery`` class::
 
     from django_celery_extensions.celery import Celery
 
-
     app = Celery('example')
 
-You can use ``django_celery_extensions.celery.CeleryQueueEnum`` to define default configuration for tasks in this queue::
+You can use ``django_celery_extensions.celery.CeleryQueueEnum`` to define default configuration for tasks in the queue::
 
 
     from django_celery_extensions.celery import CeleryQueueEnum
@@ -77,9 +91,20 @@ You can use ``django_celery_extensions.celery.CeleryQueueEnum`` to define defaul
         FAST = ('fast', {'time_limit': 10})
 
 
-You can now define task and set the right queue::
+You can define task and set the right queue now::
 
-    @celery_app.task(
-        queue=CeleryQueue.FAST)
+    @celery_app.task(queue=CeleryQueue.FAST)
     def task_with_fast_queue():
+        return 'result'
+
+If you need to override celery task class you should use ``django_celery_extensions.task.DjangoTask`` class::
+
+
+    from django_celery_extensions.task import DjangoTask
+
+    class YourTask(DjangoTask):
+        ...
+
+    @celery_app.task(base=YourTask)
+    def your_task():
         return 'result'
